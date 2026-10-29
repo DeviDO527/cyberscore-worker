@@ -1,0 +1,39 @@
+{
+  "name": "cyberscore-worker",
+  "version": "1.0.0",
+  "description": "Worker asincrono para el procesamiento de evaluaciones de seguridad de CyberScore PYME.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeviD0527/cyberscore-worker.git"
+  },
+  "keywords": [
+    "cyberscore",
+    "security",
+    "worker",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "mysql2": "^3.24.6",
+    "pino": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.6",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.15",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
