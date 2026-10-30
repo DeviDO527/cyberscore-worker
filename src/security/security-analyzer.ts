@@ -6,6 +6,11 @@ export interface SecurityFinding {
     description: string;
 }
 
+export interface EnrichedSecurityFinding extends SecurityFinding {
+    layer: 'dns' | 'tls' | 'headers';
+    evidence: string | null;
+}
+
 export interface LayerAnalysisResult {
     status: string;
     findings: SecurityFinding[];
@@ -15,18 +20,32 @@ export interface DnsLayerAnalysisResult extends LayerAnalysisResult {
     records: DnsRecords;
 }
 
-export interface SecurityLayerAnalyzer {
-    analyze(domain: string): Promise<LayerAnalysisResult>;
+export interface TlsLayerAnalysisResult extends LayerAnalysisResult {
+    authorized: boolean;
+    protocol: string;
+    certificate: {
+        validFrom: string;
+        validTo: string;
+        subject: Record<string, unknown>;
+        issuer: Record<string, unknown>;
+    };
 }
 
-export interface DnsSecurityLayerAnalyzer {
-    analyze(domain: string): Promise<DnsLayerAnalysisResult>;
+export interface HeadersLayerAnalysisResult extends LayerAnalysisResult {
+    statusCode: number;
+    headers: Record<string, string | string[] | undefined>;
+}
+
+export interface SecurityLayerAnalyzer<
+    TResult extends LayerAnalysisResult = LayerAnalysisResult,
+> {
+    analyze(domain: string): Promise<TResult>;
 }
 
 export interface SecurityAnalyzerDependencies {
-    dnsAnalyzer: DnsSecurityLayerAnalyzer;
-    tlsAnalyzer: SecurityLayerAnalyzer;
-    headersAnalyzer: SecurityLayerAnalyzer;
+    dnsAnalyzer: SecurityLayerAnalyzer<DnsLayerAnalysisResult>;
+    tlsAnalyzer: SecurityLayerAnalyzer<TlsLayerAnalysisResult>;
+    headersAnalyzer: SecurityLayerAnalyzer<HeadersLayerAnalysisResult>;
 }
 
 export interface SecurityLayersSummary {
@@ -45,7 +64,7 @@ export interface SecurityLayersSummary {
 }
 
 export interface SecurityAnalysisResult {
-    findings: SecurityFinding[];
+    findings: EnrichedSecurityFinding[];
     dnsRecords: DnsRecords;
     layersSummary: SecurityLayersSummary;
 }
@@ -65,13 +84,14 @@ export class SecurityAnalyzer {
 
         const normalizedDomain = domain.trim();
 
-        if (
-            normalizedDomain.length > 253 ||
-            !/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/.test(
+        const validDomain =
+            normalizedDomain.length <= 253 &&
+            normalizedDomain.includes('.') &&
+            /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/.test(
                 normalizedDomain,
-            ) ||
-            !normalizedDomain.includes('.')
-        ) {
+            );
+
+        if (!validDomain) {
             throw new Error('El dominio no tiene un formato válido');
         }
 
@@ -83,33 +103,88 @@ export class SecurityAnalyzer {
                 this.dependencies.headersAnalyzer.analyze(normalizedDomain),
             ]);
 
-        // Consolidar exclusivamente los hallazgos reales.
-        const findings: SecurityFinding[] = [
-            ...dnsResult.findings,
-            ...tlsResult.findings,
-            ...headersResult.findings,
+        // Evidencia DNS.
+        const dnsEvidence = JSON.stringify({
+            records: dnsResult.records,
+        });
+
+        // Evidencia TLS.
+        const tlsEvidence = JSON.stringify({
+            authorized: tlsResult.authorized,
+            protocol: tlsResult.protocol,
+            certificate: tlsResult.certificate,
+        });
+
+        // Evitar almacenar cabeceras que puedan contener
+        // cookies u otros datos sensibles.
+        const relevantHeaders = new Set([
+            'strict-transport-security',
+            'content-security-policy',
+            'x-content-type-options',
+            'x-frame-options',
+            'referrer-policy',
+            'permissions-policy',
+            'cross-origin-embedder-policy',
+            'cross-origin-opener-policy',
+            'cross-origin-resource-policy',
+        ]);
+
+        const safeHeaders = Object.fromEntries(
+            Object.entries(headersResult.headers).filter(
+                ([name]) => relevantHeaders.has(name.toLowerCase()),
+            ),
+        );
+
+        const headersEvidence = JSON.stringify({
+            statusCode: headersResult.statusCode,
+            headers: safeHeaders,
+        });
+
+        // Enriquecer los hallazgos con su procedencia y evidencia.
+        const dnsFindings: EnrichedSecurityFinding[] =
+            dnsResult.findings.map(finding => ({
+                ...finding,
+                layer: 'dns',
+                evidence: dnsEvidence,
+            }));
+
+        const tlsFindings: EnrichedSecurityFinding[] =
+            tlsResult.findings.map(finding => ({
+                ...finding,
+                layer: 'tls',
+                evidence: tlsEvidence,
+            }));
+
+        const headersFindings: EnrichedSecurityFinding[] =
+            headersResult.findings.map(finding => ({
+                ...finding,
+                layer: 'headers',
+                evidence: headersEvidence,
+            }));
+
+        const findings: EnrichedSecurityFinding[] = [
+            ...dnsFindings,
+            ...tlsFindings,
+            ...headersFindings,
         ];
 
         return {
             findings,
 
-            // Conservar los registros DNS para el resultado final.
             dnsRecords: dnsResult.records,
 
             layersSummary: {
                 dns: {
                     status: dnsResult.status,
-                    findings: dnsResult.findings.length,
+                    findings: dnsFindings.length,
                 },
-
                 tls: {
                     status: tlsResult.status,
-                    findings: tlsResult.findings.length,
+                    findings: tlsFindings.length,
                 },
-
                 headers: {
                     status: headersResult.status,
-                    findings: headersResult.findings.length,
+                    findings: headersFindings.length,
                 },
             },
         };

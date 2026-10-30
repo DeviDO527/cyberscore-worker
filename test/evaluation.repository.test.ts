@@ -49,14 +49,17 @@ describe('EvaluationRepository', () => {
     });
     it('reclama una evaluación pendiente y devuelve sus datos', async () => {
         mockConnection.query.mockResolvedValue([
-        [
-            {
-                id: 'evaluation-123',
-                pyme_id: 'pyme-456',
-                dominio: 'example.com',
-            },
-        ],
-        [],
+            [
+                {
+                    id: 'evaluation-123',
+                    pyme_id: 'pyme-456',
+                    dominio: 'example.com',
+                    ingresos_mensuales: '30000000.00',
+                    horas_operativas: 300,
+                    moneda: 'COP',
+                },
+            ],
+            [],
         ]);
 
         mockConnection.execute.mockResolvedValue([
@@ -65,11 +68,29 @@ describe('EvaluationRepository', () => {
         ]);
 
         const result = await repository.claimNext();
+        const queryCall = mockConnection.query.mock.calls[0];
+
+        expect(queryCall).toBeDefined();
+            
+        const [sql] = queryCall!;
+            
+        expect(sql).toContain('INNER JOIN pymes');
+        expect(sql).toContain('ingresos_mensuales');
+        expect(sql).toContain('horas_operativas');
+        expect(sql).toContain('moneda');
+        expect(queryCall).toBeDefined();
+        expect(sql).toContain("WHERE e.estado = 'queued'");
+        expect(sql).toContain('ORDER BY e.iniciado_en ASC, e.id ASC');
+        expect(sql).toContain('LIMIT 1');
+        expect(sql).toContain('FOR UPDATE');
 
         expect(result).toEqual({
-          id: 'evaluation-123',
-          pymeId: 'pyme-456',
-          domain: 'example.com',
+            id: 'evaluation-123',
+            pymeId: 'pyme-456',
+            domain: 'example.com',
+            monthlyRevenue: 30000000,
+            operatingHours: 300,
+            currency: 'COP',
         });
 
         expect(mockConnection.beginTransaction).toHaveBeenCalledTimes(1);
@@ -96,14 +117,17 @@ describe('EvaluationRepository', () => {
 
     it('revierte la transacción si falla la actualización', async () => {
         mockConnection.query.mockResolvedValue([
-        [
-            {
-                id: 'evaluation-123',
-                pyme_id: 'pyme-456',
-                dominio: 'example.com',
-            },
-        ],
-        [],
+            [
+                {
+                    id: 'evaluation-123',
+                    pyme_id: 'pyme-456',
+                    dominio: 'example.com',
+                    ingresos_mensuales: '30000000.00',
+                    horas_operativas: 300,
+                    moneda: 'COP',
+                },
+            ],
+            [],
         ]);
 
         mockConnection.execute.mockRejectedValue(
@@ -140,6 +164,9 @@ describe('EvaluationRepository', () => {
                     id: 'evaluation-123',
                     pyme_id: 'pyme-456',
                     dominio: 'example.com',
+                    ingresos_mensuales: '30000000.00',
+                    horas_operativas: 300,
+                    moneda: 'COP',
                 },
             ],
             [],
@@ -209,6 +236,9 @@ describe('EvaluationRepository', () => {
                     id: 'evaluation-123',
                     pyme_id: 'pyme-456',
                     dominio: 'example.com',
+                    ingresos_mensuales: '30000000.00',
+                    horas_operativas: 300,
+                    moneda: 'COP',
                 },
             ],
             [],
@@ -231,5 +261,28 @@ describe('EvaluationRepository', () => {
         expect(mockConnection.release).toHaveBeenCalledTimes(1);
     });
 
+    it('rechaza una PYME con ingresos mensuales inválidos', async () => {
+        mockConnection.query.mockResolvedValue([
+            [
+                {
+                    id: 'evaluation-123',
+                    pyme_id: 'pyme-456',
+                    dominio: 'example.com',
+                    ingresos_mensuales: 'invalid',
+                    horas_operativas: 300,
+                    moneda: 'COP',
+                },
+            ],
+            [],
+        ]);
+
+        await expect(
+            repository.claimNext(),
+        ).rejects.toThrow();
+
+        expect(mockConnection.execute).not.toHaveBeenCalled();
+        expect(mockConnection.rollback).toHaveBeenCalledTimes(1);
+        expect(mockConnection.release).toHaveBeenCalledTimes(1);
+    });
 
 });

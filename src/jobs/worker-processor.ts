@@ -1,23 +1,13 @@
-import type { EvaluationRepository } from './evaluation.repository';
-import type { EvaluationResultRepository } from './evaluation-result.repository';
+import type { EvaluationResult } from './evaluation-result.repository';
+import type { FindingToPersist } from './evaluation-result.repository';
 
-interface Evaluation {
-    id: string;
-    pymeId: string;
-    domain: string;
-}
+import type { PendingEvaluation } from './evaluation.repository';
 
 interface AnalysisResult {
     score: number;
     level: string;
     layersSummary: Record<string, unknown>;
-}
-
-interface ResultData {
-    evaluationId: string;
-    score: number;
-    level: string;
-    layersSummary: Record<string, unknown>;
+    findings: FindingToPersist[];
 }
 
 interface ProcessorLogger {
@@ -27,44 +17,51 @@ interface ProcessorLogger {
 }
 
 type EvaluationAnalyzer = (
-    evaluation: Evaluation,
+    evaluation: PendingEvaluation,
 ) => Promise<AnalysisResult>;
 
 export class WorkerProcessor {
     constructor(
-    private readonly evaluationRepository: EvaluationRepository,
-    private readonly resultRepository: EvaluationResultRepository,
-    private readonly analyzeEvaluation: EvaluationAnalyzer,
-    private readonly logger: ProcessorLogger,
+        private readonly evaluationRepository: {
+            claimNext(): Promise<PendingEvaluation | null>;
+        },
+        private readonly resultRepository: {
+            complete(result: EvaluationResult): Promise<void>;
+            fail(evaluationId: string): Promise<void>;
+        },
+        private readonly analyzeEvaluation: EvaluationAnalyzer,
+        private readonly logger: ProcessorLogger,
     ) {}
-    
+
     async processNext(): Promise<boolean> {
         const evaluation = await this.evaluationRepository.claimNext();
-    
+
         if (!evaluation) {
             return false;
         }
-    
+
         try {
-            const analysis = await this.analyzeEvaluation(
-                evaluation as Evaluation,
-            );
-        
-            const result: ResultData = {
+            const analysis = await this.analyzeEvaluation(evaluation);
+
+            const result: EvaluationResult = {
                 evaluationId: evaluation.id,
+                pymeId: evaluation.pymeId,
+                domain: evaluation.domain,
                 score: analysis.score,
                 level: analysis.level,
                 layersSummary: analysis.layersSummary,
+                findings: analysis.findings,
             };
-        
+
             await this.resultRepository.complete(result);
-        
+
             this.logger.info(
                 { evaluationId: evaluation.id },
                 'Evaluación procesada correctamente.',
             );
-        
+
             return true;
+
         } catch (error: unknown) {
             this.logger.error(
                 {
@@ -76,7 +73,7 @@ export class WorkerProcessor {
                 },
                 'Falló el procesamiento de la evaluación.',
             );
-        
+
             try {
                 await this.resultRepository.fail(evaluation.id);
             } catch (failureError: unknown) {
@@ -91,9 +88,8 @@ export class WorkerProcessor {
                     'No fue posible registrar el fallo de la evaluación.',
                 );
             }
-        
+
             return true;
         }
     }
-
 }

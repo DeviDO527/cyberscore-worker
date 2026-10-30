@@ -12,16 +12,31 @@ describe('WorkerProcessor', () => {
     const analysisResult = {
         score: 85,
         level: 'Bajo',
+
         layersSummary: {
+            dns: {
+                status: 'completed',
+                findings: 0,
+            },
             tls: {
                 status: 'completed',
                 findings: 0,
             },
             headers: {
                 status: 'completed',
-                findings: 2,
+                findings: 1,
             },
         },
+
+        findings: [
+            {
+                layer: 'headers',
+                severity: 'low',
+                title: 'Cabecera de seguridad ausente',
+                description: 'No se encontró una cabecera de seguridad esperada.',
+                evidence: null,
+            },
+        ],
     };
 
     let evaluationRepository: {
@@ -104,9 +119,12 @@ describe('WorkerProcessor', () => {
 
         expect(resultRepository.complete).toHaveBeenCalledWith({
             evaluationId: evaluation.id,
+            pymeId: evaluation.pymeId,
+            domain: evaluation.domain,
             score: analysisResult.score,
             level: analysisResult.level,
             layersSummary: analysisResult.layersSummary,
+            findings: analysisResult.findings,
         });
     });
 

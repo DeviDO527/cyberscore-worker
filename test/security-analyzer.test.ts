@@ -20,11 +20,23 @@ describe('SecurityAnalyzer', () => {
 
     const tlsResult = {
         status: 'completed',
+        authorized: true,
+        protocol: 'TLSv1.3',
+        certificate: {
+            validFrom: 'Jan 01 00:00:00 2026 GMT',
+            validTo: 'Jan 01 00:00:00 2027 GMT',
+            subject: { CN: 'example.com' },
+            issuer: { CN: 'Example CA' },
+        },
         findings: [],
     };
 
     const headersResult = {
         status: 'completed',
+        statusCode: 200,
+        headers: {
+            'strict-transport-security': 'max-age=31536000',
+        },
         findings: [
             {
                 title: 'Cabecera de seguridad ausente',
@@ -171,6 +183,8 @@ describe('SecurityAnalyzer', () => {
     
         headersAnalyzer.analyze.mockResolvedValue({
             status: 'completed',
+            statusCode: 200,
+            headers: {},
             findings: [],
         });
     
@@ -202,6 +216,67 @@ describe('SecurityAnalyzer', () => {
         const result = await analyzer.analyze(domain);
 
         expect(result.dnsRecords).toEqual(dnsResult.records);
+    });
+
+    it('asigna la capa y conserva evidencia de los hallazgos HTTP', async () => {
+        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
+        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
+        headersAnalyzer.analyze.mockResolvedValue(headersResult);
+
+        const result = await analyzer.analyze(domain);
+
+        expect(result.findings).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    layer: 'headers',
+                    title: 'Cabecera de seguridad ausente',
+                    severity: 'medium',
+                    evidence: JSON.stringify({
+                        statusCode: 200,
+                        headers: headersResult.headers,
+                    }),
+                }),
+            ]),
+        );
+    });
+
+    it('asigna la capa y conserva evidencia de los hallazgos TLS', async () => {
+        const tlsFailure = {
+            ...tlsResult,
+            authorized: false,
+            protocol: 'TLSv1.2',
+            findings: [
+                {
+                    title: 'Certificado TLS no autorizado',
+                    severity: 'high',
+                    description: 'No se pudo validar el certificado.',
+                },
+            ],
+        };
+
+        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
+        tlsAnalyzer.analyze.mockResolvedValue(tlsFailure);
+        headersAnalyzer.analyze.mockResolvedValue({
+            ...headersResult,
+            findings: [],
+        });
+
+        const result = await analyzer.analyze(domain);
+
+        expect(result.findings).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    layer: 'tls',
+                    title: 'Certificado TLS no autorizado',
+                    severity: 'high',
+                    evidence: JSON.stringify({
+                        authorized: false,
+                        protocol: 'TLSv1.2',
+                        certificate: tlsResult.certificate,
+                    }),
+                }),
+            ]),
+        );
     });
 
 });

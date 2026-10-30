@@ -1,29 +1,34 @@
-import type { Pool, PoolConnection, ResultSetHeader,} from 'mysql2/promise';
+import { randomUUID } from 'node:crypto';
+
+import type {
+    Pool,
+    PoolConnection,
+    ResultSetHeader,
+} from 'mysql2/promise';
+
+export interface FindingToPersist {
+    layer: string;
+    severity: string;
+    title: string;
+    description: string;
+    evidence?: string | null;
+}
 
 export interface EvaluationResult {
     evaluationId: string;
+    pymeId: string;
+    domain: string;
     score: number;
     level: string;
     layersSummary: Record<string, unknown>;
+    findings: FindingToPersist[];
 }
 
 export class EvaluationResultRepository {
     constructor(private readonly pool: Pool) {}
 
     async complete(result: EvaluationResult): Promise<void> {
-        this.validateEvaluationId(result.evaluationId);
-        this.validateScore(result.score);
-        this.validateLevel(result.level);
-
-        if (
-            result.layersSummary === null ||
-            typeof result.layersSummary !== 'object' ||
-            Array.isArray(result.layersSummary)
-        ) {
-            throw new Error(
-                'El resumen de las capas debe ser un objeto válido.',
-            );
-        }
+        this.validateResult(result);
 
         const connection = await this.pool.getConnection();
         let transactionStarted = false;
@@ -32,30 +37,89 @@ export class EvaluationResultRepository {
             await connection.beginTransaction();
             transactionStarted = true;
 
-            const [updateResult] = await connection.execute<ResultSetHeader>(
-                `UPDATE evaluaciones
-                 SET estado = 'done',
-                     score = ?,
-                     nivel = ?,
-                     capas_resumen = ?,
-                     finalizado_en = CURRENT_TIMESTAMP
-                 WHERE id = ?
-                   AND estado = 'running'`,
-                [
-                    result.score,
-                    result.level.trim(),
-                    JSON.stringify(result.layersSummary),
-                    result.evaluationId.trim(),
-                ],
-            );
+            // 1. Actualizar la evaluación.
+            const [updateResult] =
+                await connection.execute<ResultSetHeader>(
+                    `UPDATE evaluaciones
+                     SET estado = 'done',
+                         score = ?,
+                         nivel = ?,
+                         capas_resumen = ?,
+                         finalizado_en = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                       AND estado = 'running'`,
+                    [
+                        result.score,
+                        result.level.trim(),
+                        JSON.stringify(result.layersSummary),
+                        result.evaluationId.trim(),
+                    ],
+                );
 
             this.ensureOneRowUpdated(
                 updateResult,
                 'No fue posible completar la evaluación.',
             );
 
+            // 2. Persistir los hallazgos.
+            for (const finding of result.findings) {
+                const [findingResult] =
+                    await connection.execute<ResultSetHeader>(
+                        `INSERT INTO hallazgos
+                         (
+                             id,
+                             evaluacion_id,
+                             capa,
+                             severidad,
+                             titulo,
+                             descripcion,
+                             evidencia
+                         )
+                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                            randomUUID(),
+                            result.evaluationId.trim(),
+                            finding.layer.trim(),
+                            this.normalizeSeverity(finding.severity),
+                            finding.title.trim(),
+                            finding.description.trim(),
+                            finding.evidence ?? null,
+                        ],
+                    );
+
+                this.ensureOneRowUpdated(
+                    findingResult,
+                    'No fue posible guardar un hallazgo.',
+                );
+            }
+
+            // 3. Registrar el historial del CyberScore.
+            const [historyResult] =
+                await connection.execute<ResultSetHeader>(
+                    `INSERT INTO historial_scores
+                     (
+                         id,
+                         dominio,
+                         pyme_id,
+                         score
+                     )
+                     VALUES (?, ?, ?, ?)`,
+                    [
+                        randomUUID(),
+                        result.domain.trim(),
+                        result.pymeId.trim(),
+                        result.score,
+                    ],
+                );
+
+            this.ensureOneRowUpdated(
+                historyResult,
+                'No fue posible registrar el historial del CyberScore.',
+            );
+
             await connection.commit();
             transactionStarted = false;
+
         } catch (error) {
             if (transactionStarted) {
                 await this.rollbackPreservingOriginalError(
@@ -65,6 +129,7 @@ export class EvaluationResultRepository {
             }
 
             throw error;
+
         } finally {
             connection.release();
         }
@@ -80,14 +145,15 @@ export class EvaluationResultRepository {
             await connection.beginTransaction();
             transactionStarted = true;
 
-            const [updateResult] = await connection.execute<ResultSetHeader>(
-                `UPDATE evaluaciones
-                 SET estado = 'failed',
-                     finalizado_en = CURRENT_TIMESTAMP
-                 WHERE id = ?
-                   AND estado = 'running'`,
-                [evaluationId.trim()],
-            );
+            const [updateResult] =
+                await connection.execute<ResultSetHeader>(
+                    `UPDATE evaluaciones
+                     SET estado = 'failed',
+                         finalizado_en = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                       AND estado = 'running'`,
+                    [evaluationId.trim()],
+                );
 
             this.ensureOneRowUpdated(
                 updateResult,
@@ -96,6 +162,7 @@ export class EvaluationResultRepository {
 
             await connection.commit();
             transactionStarted = false;
+
         } catch (error) {
             if (transactionStarted) {
                 await this.rollbackPreservingOriginalError(
@@ -105,20 +172,112 @@ export class EvaluationResultRepository {
             }
 
             throw error;
+
         } finally {
             connection.release();
         }
     }
 
-    private validateEvaluationId(evaluationId: string): void {
+    private validateResult(result: EvaluationResult): void {
+        if (!result || typeof result !== 'object') {
+            throw new Error('El resultado de la evaluación es obligatorio.');
+        }
+
+        this.validateEvaluationId(result.evaluationId);
+        this.validateScore(result.score);
+        this.validateLevel(result.level);
+        this.validateText(result.pymeId, 'El identificador de la PYME');
+        this.validateText(result.domain, 'El dominio');
+
+        if (result.domain.trim().length > 255) {
+            throw new Error('El dominio supera los 255 caracteres.');
+        }
+
         if (
-            typeof evaluationId !== 'string' ||
-            evaluationId.trim().length === 0
+            result.layersSummary === null ||
+            typeof result.layersSummary !== 'object' ||
+            Array.isArray(result.layersSummary)
         ) {
             throw new Error(
-                'El identificador de la evaluación es obligatorio.',
+                'El resumen de las capas debe ser un objeto válido.',
             );
         }
+
+        if (!Array.isArray(result.findings)) {
+            throw new Error('Los hallazgos deben proporcionarse como una lista.');
+        }
+
+        for (const finding of result.findings) {
+            this.validateFinding(finding);
+        }
+    }
+
+    private validateFinding(finding: FindingToPersist): void {
+        if (!finding || typeof finding !== 'object') {
+            throw new Error('El hallazgo proporcionado no es válido.');
+        }
+
+        this.validateText(finding.layer, 'La capa del hallazgo');
+        this.validateText(finding.title, 'El título del hallazgo');
+        this.validateText(finding.description, 'La descripción del hallazgo');
+
+        if (finding.layer.trim().length > 50) {
+            throw new Error('La capa supera los 50 caracteres.');
+        }
+
+        if (finding.title.trim().length > 255) {
+            throw new Error('El título supera los 255 caracteres.');
+        }
+
+        if (
+            finding.evidence !== undefined &&
+            finding.evidence !== null &&
+            typeof finding.evidence !== 'string'
+        ) {
+            throw new Error('La evidencia del hallazgo debe ser texto o null.');
+        }
+
+        if (finding.severity) {
+            this.normalizeSeverity(finding.severity);
+        } else {
+            throw new Error('La severidad del hallazgo es obligatoria.');
+        }
+    }
+
+    private normalizeSeverity(severity: string): string {
+        const normalized = severity
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+
+        const severityMap: Record<string, string> = {
+            low: 'BAJA',
+            baja: 'BAJA',
+            medium: 'MEDIA',
+            media: 'MEDIA',
+            high: 'ALTA',
+            alta: 'ALTA',
+            critical: 'CRITICA',
+            critica: 'CRITICA',
+        };
+
+        const mappedSeverity = severityMap[normalized];
+
+        if (!mappedSeverity) {
+            throw new Error(
+                `La severidad '${severity}' no está permitida.`,
+            );
+        }
+
+        return mappedSeverity;
+    }
+
+    private validateEvaluationId(evaluationId: string): void {
+        this.validateText(
+            evaluationId,
+            'El identificador de la evaluación',
+        );
     }
 
     private validateScore(score: number): void {
@@ -134,13 +293,15 @@ export class EvaluationResultRepository {
     }
 
     private validateLevel(level: string): void {
+        this.validateText(level, 'El nivel de riesgo');
+    }
+
+    private validateText(value: string, name: string): void {
         if (
-            typeof level !== 'string' ||
-            level.trim().length === 0
+            typeof value !== 'string' ||
+            value.trim().length === 0
         ) {
-            throw new Error(
-                'El nivel de riesgo es obligatorio.',
-            );
+            throw new Error(`${name} es obligatorio.`);
         }
     }
 
@@ -163,8 +324,6 @@ export class EvaluationResultRepository {
             // Conservamos el error original de la operación.
         }
 
-        // El error original se propaga desde el bloque catch.
         void originalError;
     }
-
 }

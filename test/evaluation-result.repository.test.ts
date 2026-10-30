@@ -45,12 +45,35 @@ describe('EvaluationResultRepository', () => {
     describe('complete', () => {
         const result = {
             evaluationId: 'evaluation-123',
+            pymeId: 'pyme-456',
+            domain: 'example.com',
             score: 85,
             level: 'Bajo',
+
             layersSummary: {
-                tls: { status: 'completed', findings: 0 },
-                headers: { status: 'completed', findings: 2 },
+                dns: {
+                    status: 'completed',
+                    findings: 0,
+                },
+                tls: {
+                    status: 'completed',
+                    findings: 0,
+                },
+                headers: {
+                    status: 'completed',
+                    findings: 1,
+                },
             },
+        
+            findings: [
+                {
+                    layer: 'headers',
+                    severity: 'low',
+                    title: 'Cabecera de seguridad ausente',
+                    description: 'No se encontró una cabecera de seguridad esperada.',
+                    evidence: null,
+                },
+            ],
         };
 
         it('guarda el resultado y confirma la transacción', async () => {
@@ -58,30 +81,68 @@ describe('EvaluationResultRepository', () => {
                 { affectedRows: 1 },
                 [],
             ]);
-
+        
+            // Ejecutar primero la operación que estamos probando.
             await repository.complete(result);
-
+        
             expect(mockConnection.beginTransaction).toHaveBeenCalledTimes(1);
-            expect(mockConnection.execute).toHaveBeenCalledTimes(1);
-
+            expect(mockConnection.execute).toHaveBeenCalledTimes(3);
+        
+            // 1. Actualización de evaluaciones.
             const firstCall = mockConnection.execute.mock.calls[0];
-
+        
             expect(firstCall).toBeDefined();
-
+        
             const [sql, values] = firstCall!;
-
+        
             expect(sql).toContain("SET estado = 'done'");
             expect(sql).toContain('score = ?');
             expect(sql).toContain('nivel = ?');
             expect(sql).toContain('capas_resumen = ?');
             expect(sql).toContain('finalizado_en');
+        
             expect(values).toEqual([
                 85,
                 'Bajo',
                 JSON.stringify(result.layersSummary),
                 'evaluation-123',
             ]);
-
+        
+            // 2. Inserción de hallazgos.
+            const findingCall = mockConnection.execute.mock.calls[1];
+        
+            expect(findingCall).toBeDefined();
+        
+            const [findingSql, findingValues] = findingCall!;
+        
+            expect(findingSql).toContain('INSERT INTO hallazgos');
+        
+            expect(findingValues).toEqual([
+                expect.any(String),
+                'evaluation-123',
+                'headers',
+                'BAJA',
+                'Cabecera de seguridad ausente',
+                'No se encontró una cabecera de seguridad esperada.',
+                null,
+            ]);
+        
+            // 3. Inserción del historial.
+            const historyCall = mockConnection.execute.mock.calls[2];
+        
+            expect(historyCall).toBeDefined();
+        
+            const [historySql, historyValues] = historyCall!;
+        
+            expect(historySql).toContain('INSERT INTO historial_scores');
+        
+            expect(historyValues).toEqual([
+                expect.any(String),
+                'example.com',
+                'pyme-456',
+                85,
+            ]);
+        
             expect(mockConnection.commit).toHaveBeenCalledTimes(1);
             expect(mockConnection.rollback).not.toHaveBeenCalled();
             expect(mockConnection.release).toHaveBeenCalledTimes(1);
