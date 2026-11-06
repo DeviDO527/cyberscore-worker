@@ -1,6 +1,8 @@
+type HeaderValue = string | string[] | undefined;
+
 export interface HttpInspection {
     statusCode: number;
-    headers: Record<string, string | string[] | undefined>;
+    headers: Record<string, HeaderValue>;
 }
 
 export interface HttpInspector {
@@ -16,7 +18,7 @@ export interface HeaderFinding {
 export interface HeadersAnalysisResult {
     status: 'completed';
     statusCode: number;
-    headers: Record<string, string | string[] | undefined>;
+    headers: Record<string, HeaderValue>;
     findings: HeaderFinding[];
 }
 

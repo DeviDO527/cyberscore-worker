@@ -80,6 +80,27 @@ describe('TlsAnalyzer', () => {
         ]);
     });
 
+    it('indica que la causa no fue especificada si falta el error de autorización', async () => {
+        tlsMock.inspect.mockResolvedValue({
+            authorized: false,
+            protocol: 'TLSv1.2',
+            validFrom: 'Jan 01 00:00:00 2026 GMT',
+            validTo: 'Jan 01 00:00:00 2027 GMT',
+            subject: { CN: 'example.com' },
+            issuer: { CN: 'Unknown CA' },
+        });
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.findings).toEqual([
+            expect.objectContaining({
+                description: expect.stringContaining(
+                    'La causa no fue especificada.',
+                ),
+            }),
+        ]);
+    });
+
     it('rechaza un dominio vacío sin consultar TLS', async () => {
         await expect(analyzer.analyze('')).rejects.toThrow();
 

@@ -119,4 +119,103 @@ describe('EconomicImpactCalculator', () => {
             }),
         ).toThrow();
     });
+
+    it('rechaza una entrada nula', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding(
+                null as never,
+            ),
+        ).toThrow(
+            'Los datos económicos son obligatorios.',
+        );
+    });
+
+    it('rechaza una entrada que no sea un objeto', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding(
+                'datos inválidos' as never,
+            ),
+        ).toThrow(
+            'Los datos económicos son obligatorios.',
+        );
+    });
+
+    it('rechaza una moneda que no sea una cadena', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding({
+                ...baseInput,
+                currency: null as never,
+            }),
+        ).toThrow(
+            'La moneda de la PYME no es válida.',
+        );
+    });
+
+    it('rechaza monedas que no están soportadas', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding({
+                ...baseInput,
+                currency: 'GBP',
+            }),
+        ).toThrow(
+            'La moneda de la PYME no es válida.',
+        );
+    });
+
+    it.each([
+        {
+            description: 'el costo de recuperación',
+            input: {
+                ...baseInput,
+                interruptionHours: 0,
+                remediationHours: Number.MAX_VALUE,
+            },
+        },
+        {
+            description: 'la pérdida por interrupción',
+            input: {
+                ...baseInput,
+                interruptionHours: Number.MAX_VALUE,
+                remediationHours: 0,
+            },
+        },
+        {
+            description: 'la pérdida potencial total',
+            input: {
+                ...baseInput,
+                monthlyRevenue: Number.MAX_VALUE * 0.75,
+                operatingHours: 1,
+                interruptionHours: 1,
+                remediationHours: 1,
+            },
+        },
+    ])(
+        'rechaza cuando $description excede el rango numérico',
+        ({ input }) => {
+            expect(() =>
+                calculateEconomicImpactForFinding(input),
+            ).toThrow(
+                'Los cálculos económicos exceden el rango numérico permitido.',
+            );
+        },
+    );
+
+    it('rechaza horas de interrupción que no sean finitas', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding({
+                ...baseInput,
+                interruptionHours: Number.NaN,
+            }),
+        ).toThrow(RangeError);
+    });
+    
+    it('rechaza horas de remediación infinitas', () => {
+        expect(() =>
+            calculateEconomicImpactForFinding({
+                ...baseInput,
+                remediationHours: Number.POSITIVE_INFINITY,
+            }),
+        ).toThrow(RangeError);
+    });
+
 });

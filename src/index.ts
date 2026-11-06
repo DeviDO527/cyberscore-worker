@@ -49,7 +49,9 @@ function sleep(milliseconds: number): Promise<void> {
 // INICIALIZACIÓN DEL WORKER
 // =====================================================
 
-async function main(): Promise<void> {
+export async function main(
+    sleepFn: (milliseconds: number) => Promise<void> = sleep,
+): Promise<void> {
     let shutdownRequested = false;
 
     process.once('SIGINT', () => {
@@ -220,7 +222,7 @@ async function main(): Promise<void> {
 
             // Esperar únicamente cuando no existan evaluaciones.
             if (!processedAny && !shutdownRequested) {
-                await sleep(config.worker.pollIntervalMs);
+                await sleepFn(config.worker.pollIntervalMs); // NOSONAR - El worker debe esperar antes de consultar nuevamente la cola vacía.
             }
         }
 
@@ -237,7 +239,7 @@ async function main(): Promise<void> {
 // ARRANQUE
 // =====================================================
 
-main().catch(error => {
+function handleStartupFailure(error: unknown): void {
     logger.fatal(
         {
             error:
@@ -249,4 +251,22 @@ main().catch(error => {
     );
 
     process.exitCode = 1;
-});
+}
+
+export function startWorker(): Promise<void> {
+    return main().catch(handleStartupFailure);
+}
+
+export function bootstrap(
+    isMainModule = require.main === module,
+): Promise<void> | undefined {
+    if (!isMainModule) {
+        return undefined;
+    }
+
+    return startWorker();
+}
+
+if (require.main === module) {
+    bootstrap()?.catch(handleStartupFailure);
+}

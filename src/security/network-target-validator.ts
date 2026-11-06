@@ -10,6 +10,55 @@ export interface DnsResolver {
     resolve(hostname: string): Promise<ResolvedAddress[]>;
 }
 
+type IPv4Octets = readonly [number, number, number, number];
+type IPv6Groups = readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+];
+
+const DEFAULT_DNS_RESOLVER: DnsResolver = {
+    resolve: async hostname => lookup(hostname, {
+        all: true,
+        verbatim: true,
+    }),
+};
+
+// Fixed special-use ranges stay in code so configuration cannot weaken SSRF protection.
+const BLOCKED_IPV4_RANGES: ReadonlyArray<readonly [IPv4Octets, number]> = [
+    [[0, 0, 0, 0], 8],
+    [[10, 0, 0, 0], 8],
+    [[100, 64, 0, 0], 10],
+    [[127, 0, 0, 0], 8],
+    [[169, 254, 0, 0], 16],
+    [[172, 16, 0, 0], 12],
+    [[192, 0, 0, 0], 24],
+    [[192, 0, 2, 0], 24],
+    [[192, 88, 99, 0], 24],
+    [[192, 168, 0, 0], 16],
+    [[198, 18, 0, 0], 15],
+    [[198, 51, 100, 0], 24],
+    [[203, 0, 113, 0], 24],
+    [[224, 0, 0, 0], 4],
+    [[240, 0, 0, 0], 4],
+];
+
+const GLOBAL_UNICAST_IPV6_NETWORK: IPv6Groups = [
+    0x2000, 0, 0, 0, 0, 0, 0, 0,
+];
+
+const BLOCKED_IPV6_RANGES: ReadonlyArray<readonly [IPv6Groups, number]> = [
+    [[0x2001, 0, 0, 0, 0, 0, 0, 0], 23],
+    [[0x2001, 0x0db8, 0, 0, 0, 0, 0, 0], 32],
+    [[0x2002, 0, 0, 0, 0, 0, 0, 0], 16],
+    [[0x3fff, 0, 0, 0, 0, 0, 0, 0], 20],
+];
+
 export interface ValidatedTarget {
     hostname: string;
     addresses: string[];
@@ -25,14 +74,7 @@ export class NetworkTargetValidator {
 
     constructor(
         allowedDomains: string[],
-        private readonly dnsResolver: DnsResolver = {
-            resolve: async (hostname) => {
-                return lookup(hostname, {
-                    all: true,
-                    verbatim: true,
-                });
-            },
-        },
+        private readonly dnsResolver: DnsResolver = DEFAULT_DNS_RESOLVER,
         options: NetworkTargetValidatorOptions = {},
     ) {
         this.allowedDomains = new Set(
@@ -136,36 +178,20 @@ export class NetworkTargetValidator {
     }
 
     private isPublicIPv4(address: string): boolean {
-        const blockedRanges: Array<[string, number]> = [
-            ['0.0.0.0', 8],
-            ['10.0.0.0', 8],
-            ['100.64.0.0', 10],
-            ['127.0.0.0', 8],
-            ['169.254.0.0', 16],
-            ['172.16.0.0', 12],
-            ['192.0.0.0', 24],
-            ['192.0.2.0', 24],
-            ['192.88.99.0', 24],
-            ['192.168.0.0', 16],
-            ['198.18.0.0', 15],
-            ['198.51.100.0', 24],
-            ['203.0.113.0', 24],
-            ['224.0.0.0', 4],
-            ['240.0.0.0', 4],
-        ];
-
-        return !blockedRanges.some(([network, prefix]) =>
+        return !BLOCKED_IPV4_RANGES.some(([network, prefix]) =>
             this.isIPv4InCidr(address, network, prefix),
         );
     }
 
     private isIPv4InCidr(
         address: string,
-        network: string,
+        network: string | IPv4Octets,
         prefix: number,
     ): boolean {
         const ipValue = this.ipv4ToNumber(address);
-        const networkValue = this.ipv4ToNumber(network);
+        const networkValue = typeof network === 'string'
+            ? this.ipv4ToNumber(network)
+            : this.ipv4PartsToNumber(network);
 
         if (ipValue === null || networkValue === null) {
             return false;
@@ -187,8 +213,10 @@ export class NetworkTargetValidator {
             return null;
         }
 
-        const parts = address.split('.').map(Number);
+        return this.ipv4PartsToNumber(address.split('.').map(Number));
+    }
 
+    private ipv4PartsToNumber(parts: readonly number[]): number | null {
         if (
             parts.length !== 4 ||
             parts.some(
@@ -210,31 +238,25 @@ export class NetworkTargetValidator {
     }
 
     private isPublicIPv6(address: string): boolean {
-        // Solo aceptamos global unicast dentro de 2000::/3.
-        if (!this.isIPv6InCidr(address, '2000::', 3)) {
+        // Solo aceptamos global unicast dentro del prefijo global registrado.
+        if (!this.isIPv6InCidr(address, GLOBAL_UNICAST_IPV6_NETWORK, 3)) {
             return false;
         }
 
-        // Rangos especiales, de transición y reservados.
-        const blockedRanges: Array<[string, number]> = [
-            ['2001::', 23],
-            ['2001:db8::', 32],
-            ['2002::', 16],
-            ['3fff::', 20],
-        ];
-
-        return !blockedRanges.some(([network, prefix]) =>
+        return !BLOCKED_IPV6_RANGES.some(([network, prefix]) =>
             this.isIPv6InCidr(address, network, prefix),
         );
     }
 
     private isIPv6InCidr(
         address: string,
-        network: string,
+        network: string | IPv6Groups,
         prefix: number,
     ): boolean {
         const ipGroups = this.parseIPv6(address);
-        const networkGroups = this.parseIPv6(network);
+        const networkGroups = typeof network === 'string'
+            ? this.parseIPv6(network)
+            : network;
 
         if (!ipGroups || !networkGroups) {
             return false;
@@ -298,12 +320,7 @@ export class NetworkTargetValidator {
         let groups: string[];
 
         if (separatorIndex !== -1) {
-            if (
-                normalized.indexOf(
-                    '::',
-                    separatorIndex + 2,
-                ) !== -1
-            ) {
+            if (normalized.includes('::', separatorIndex + 2)) {
                 return null;
             }
 
@@ -325,7 +342,7 @@ export class NetworkTargetValidator {
 
             groups = [
                 ...left,
-                ...Array(missingGroups).fill('0'),
+                ...new Array(missingGroups).fill('0'),
                 ...right,
             ];
         } else {
@@ -341,10 +358,10 @@ export class NetworkTargetValidator {
                 return null;
             }
 
-            return parseInt(group, 16);
+            return Number.parseInt(group, 16);
         });
 
-        if (parsed.some(group => group === null)) {
+        if (parsed.includes(null)) {
             return null;
         }
 

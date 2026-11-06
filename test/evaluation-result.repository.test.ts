@@ -148,6 +148,47 @@ describe('EvaluationResultRepository', () => {
             expect(mockConnection.release).toHaveBeenCalledTimes(1);
         });
 
+        it('guarda varios hallazgos con una sola consulta', async () => {
+            const additionalFinding = {
+                layer: 'tls',
+                severity: 'medium',
+                title: 'Certificado por vencer',
+                description: 'El certificado TLS está próximo a vencer.',
+                evidence: null,
+            };
+            mockConnection.execute
+                .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+                .mockResolvedValueOnce([{ affectedRows: 2 }, []])
+                .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+
+            await repository.complete({
+                ...result,
+                findings: [result.findings[0]!, additionalFinding],
+            });
+
+            expect(mockConnection.execute).toHaveBeenCalledTimes(3);
+            const findingCall = mockConnection.execute.mock.calls[1];
+            expect(findingCall).toBeDefined();
+
+            const [findingSql, findingValues] = findingCall!;
+            expect(findingSql).toContain('VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)');
+            expect(findingValues).toHaveLength(14);
+        });
+
+        it('revierte si la inserción no guarda todos los hallazgos', async () => {
+            mockConnection.execute
+                .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+                .mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+
+            await expect(repository.complete(result)).rejects.toThrow(
+                'No fue posible guardar todos los hallazgos.',
+            );
+
+            expect(mockConnection.rollback).toHaveBeenCalledTimes(1);
+            expect(mockConnection.commit).not.toHaveBeenCalled();
+            expect(mockConnection.release).toHaveBeenCalledTimes(1);
+        });
+
         it('rechaza puntuaciones fuera del intervalo permitido', async () => {
             await expect(
                 repository.complete({ ...result, score: 101 }),
@@ -252,6 +293,164 @@ describe('EvaluationResultRepository', () => {
 
             expect(mockConnection.release).toHaveBeenCalledTimes(1);
         });
+
+        it('rechaza un resultado nulo', async () => {
+            await expect(
+                repository.complete(null as never),
+            ).rejects.toThrow(
+                'El resultado de la evaluación es obligatorio.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza un resultado que no sea un objeto', async () => {
+            await expect(
+                repository.complete(123 as never),
+            ).rejects.toThrow(
+                'El resultado de la evaluación es obligatorio.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza dominios que superan los 255 caracteres', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    domain: 'a'.repeat(256),
+                }),
+            ).rejects.toThrow(
+                'El dominio supera los 255 caracteres.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            ['nulo', null],
+            ['un valor primitivo', 'invalid'],
+            ['un array', []],
+        ])(
+            'rechaza un resumen de capas que sea %s',
+            async (_description, invalidSummary) => {
+                await expect(
+                    repository.complete({
+                        ...result,
+                        layersSummary: invalidSummary as never,
+                    }),
+                ).rejects.toThrow(
+                    'El resumen de las capas debe ser un objeto válido.',
+                );
+            
+                expect(mockPool.getConnection).not.toHaveBeenCalled();
+            },
+        );
+
+        it('rechaza hallazgos que no sean una lista', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: null as never,
+                }),
+            ).rejects.toThrow(TypeError);
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza un hallazgo nulo', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [null as never],
+                }),
+            ).rejects.toThrow(
+                'El hallazgo proporcionado no es válido.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza capas de hallazgos que superan los 50 caracteres', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [{
+                        ...result.findings[0]!,
+                        layer: 'a'.repeat(51),
+                    }],
+                }),
+            ).rejects.toThrow(
+                'La capa supera los 50 caracteres.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza títulos de hallazgos que superan los 255 caracteres', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [{
+                        ...result.findings[0]!,
+                        title: 'a'.repeat(256),
+                    }],
+                }),
+            ).rejects.toThrow(
+                'El título supera los 255 caracteres.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza evidencias que no sean texto ni null', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [{
+                        ...result.findings[0]!,
+                        evidence: {} as never,
+                    }],
+                }),
+            ).rejects.toThrow(
+                'La evidencia del hallazgo debe ser texto o null.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza hallazgos sin severidad', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [{
+                        ...result.findings[0]!,
+                        severity: '',
+                    }],
+                }),
+            ).rejects.toThrow(
+                'La severidad del hallazgo es obligatoria.',
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
+        it('rechaza severidades que no están permitidas', async () => {
+            await expect(
+                repository.complete({
+                    ...result,
+                    findings: [{
+                        ...result.findings[0]!,
+                        severity: 'informational',
+                    }],
+                }),
+            ).rejects.toThrow(
+                "La severidad 'informational' no está permitida.",
+            );
+        
+            expect(mockPool.getConnection).not.toHaveBeenCalled();
+        });
+
     });
 
     describe('fail', () => {

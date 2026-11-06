@@ -77,6 +77,28 @@ describe('HeadersAnalyzer', () => {
         );
     });
 
+    it('genera un hallazgo cuando una cabecera está presente como arreglo vacío', async () => {
+        httpMock.inspect.mockResolvedValue({
+            statusCode: 200,
+            headers: {
+                'strict-transport-security': [],
+                'content-security-policy': "default-src 'self'",
+                'x-content-type-options': 'nosniff',
+                'x-frame-options': 'DENY',
+                'referrer-policy': 'no-referrer',
+            },
+        });
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.findings).toEqual([
+            expect.objectContaining({
+                description:
+                    'No se encontró Strict-Transport-Security (HSTS).',
+            }),
+        ]);
+    });
+
     it('rechaza un dominio vacío sin consultar HTTP', async () => {
         await expect(analyzer.analyze('')).rejects.toThrow();
 

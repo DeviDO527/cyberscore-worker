@@ -123,7 +123,7 @@ export function calculateEvaluationScore(
     }
 
     if (!Array.isArray(input.findings)) {
-        throw new Error(
+        throw new TypeError(
             'Los hallazgos deben proporcionarse como una lista.',
         );
     }

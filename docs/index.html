@@ -1,0 +1,398 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>cyberscore-worker</title><meta name="description" content="Documentation for cyberscore-worker"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="index.html" class="title">cyberscore-worker</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<h1>cyberscore-worker</h1></div>
+<div class="tsd-panel tsd-typography"><h1 id="cyberscore-worker" class="tsd-anchor-link">CyberScore Worker<a href="#cyberscore-worker" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>Worker asíncrono para procesar evaluaciones de seguridad de pequeñas y medianas empresas (PYMES). El proceso toma evaluaciones en cola desde MySQL, analiza el dominio en las capas DNS, TLS y cabeceras HTTP, calcula un CyberScore y guarda el resultado, los hallazgos y el historial de puntuaciones.</p>
+<blockquote>
+<p><strong>Estado del proyecto:</strong> versión 1.0.0. Este componente funciona como proceso de backend y no expone una interfaz HTTP propia.</p>
+</blockquote>
+<h2 id="tabla-de-contenidos" class="tsd-anchor-link">Tabla de contenidos<a href="#tabla-de-contenidos" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><a href="#objetivo">Objetivo</a></li>
+<li><a href="#caracter%C3%ADsticas">Características</a></li>
+<li><a href="#arquitectura-t%C3%A9cnica">Arquitectura técnica</a></li>
+<li><a href="#requisitos">Requisitos</a></li>
+<li><a href="#instalaci%C3%B3n">Instalación</a></li>
+<li><a href="#configuraci%C3%B3n">Configuración</a></li>
+<li><a href="#uso">Uso</a></li>
+<li><a href="#restricciones-de-uso-y-seguridad">Restricciones de uso y seguridad</a></li>
+<li><a href="#estados-de-una-evaluaci%C3%B3n">Estados de una evaluación</a></li>
+<li><a href="#pruebas">Pruebas</a></li>
+<li><a href="#estructura-del-proyecto">Estructura del proyecto</a></li>
+<li><a href="#operaci%C3%B3n-y-soporte">Operación y soporte</a></li>
+<li><a href="#contribuci%C3%B3n">Contribución</a></li>
+<li><a href="#licencia">Licencia</a></li>
+</ul>
+<h2 id="objetivo" class="tsd-anchor-link">Objetivo<a href="#objetivo" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Automatizar la evaluación técnica y económica de la postura de seguridad de un dominio autorizado, de manera desacoplada del sistema que crea las evaluaciones. El worker permite:</p>
+<ol>
+<li>Reclamar de forma transaccional una evaluación pendiente.</li>
+<li>Ejecutar análisis DNS, TLS y HTTP en paralelo.</li>
+<li>Identificar y clasificar hallazgos de seguridad.</li>
+<li>Calcular una puntuación de 0 a 100 y un nivel de riesgo.</li>
+<li>Persistir el resultado de forma atómica en MySQL.</li>
+</ol>
+<p>El score se calcula con la versión de fórmula <code>1.0</code> y la matriz de riesgo definida en el código. Las estimaciones económicas usan los ingresos, horas operativas y moneda registrados para la PYME.</p>
+<h2 id="características" class="tsd-anchor-link">Características<a href="#características" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li>Procesamiento continuo por lotes y con intervalo configurable.</li>
+<li>Pool de conexiones MySQL y transacciones para reclamar y completar evaluaciones.</li>
+<li>Validación de dominios y bloqueo de direcciones IP privadas, reservadas o no públicas.</li>
+<li>Análisis de registros DNS, certificado/protocolo TLS y cabeceras de seguridad HTTP.</li>
+<li>Evidencia limitada a datos relevantes; no se almacenan cabeceras potencialmente sensibles como cookies.</li>
+<li>Logging estructurado con Pino.</li>
+<li>Cierre ordenado ante <code>SIGINT</code> y <code>SIGTERM</code>.</li>
+<li>Pruebas automatizadas con Jest y TypeScript.</li>
+</ul>
+<h2 id="arquitectura-técnica" class="tsd-anchor-link">Arquitectura técnica<a href="#arquitectura-técnica" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="mermaid">flowchart LR
+    DB[(MySQL)]
+    ER[EvaluationRepository]
+    WP[WorkerProcessor]
+    SA[SecurityAnalyzer]
+    DNS[DNS Analyzer]
+    TLS[TLS Analyzer]
+    HTTP[Headers Analyzer]
+    SC[Scoring Engine]
+    RR[EvaluationResultRepository]
+    EXT[Dominios públicos autorizados]
+
+    DB -->|evaluaciones queued| ER
+    ER --> WP
+    WP --> SA
+    SA --> DNS
+    SA --> TLS
+    SA --> HTTP
+    DNS --> EXT
+    TLS --> EXT
+    HTTP --> EXT
+    SA --> SC
+    SC --> RR
+    RR -->|done/failed, hallazgos e historial| DB
+</code><button type="button">Copy</button></pre>
+
+<h3 id="componentes" class="tsd-anchor-link">Componentes<a href="#componentes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li><code>src/index.ts</code>: composición de dependencias, ciclo de polling, señales y apagado.</li>
+<li><code>src/config/env.ts</code>: carga y validación de variables de entorno.</li>
+<li><code>src/database/pool.ts</code>: pool, prueba de conexión y cierre de MySQL.</li>
+<li><code>src/jobs/</code>: reclamación de evaluaciones y persistencia de resultados.</li>
+<li><code>src/security/</code>: validación del objetivo y análisis DNS, TLS y HTTP.</li>
+<li><code>src/services/</code>: inspectores de red usados por los analizadores.</li>
+<li><code>src/scoring/</code>: matriz, cálculo de riesgo, impacto económico y CyberScore.</li>
+</ul>
+<h3 id="flujo-de-datos" class="tsd-anchor-link">Flujo de datos<a href="#flujo-de-datos" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>La tabla <code>evaluaciones</code> debe contener registros con estado <code>queued</code> y relacionarse con <code>pymes</code>. El worker cambia el registro a <code>running</code>, ejecuta el análisis y, si termina correctamente, lo cambia a <code>done</code>, guarda hallazgos en <code>hallazgos</code> y agrega una entrada en <code>historial_scores</code>. Ante un error de análisis, intenta marcarlo como <code>failed</code>.</p>
+<h2 id="requisitos" class="tsd-anchor-link">Requisitos<a href="#requisitos" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<h3 id="software" class="tsd-anchor-link">Software<a href="#software" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li>Node.js 20 LTS o superior.</li>
+<li>npm 10 o superior.</li>
+<li>MySQL compatible con <code>mysql2</code> 3.x, con el esquema de CyberScore disponible.</li>
+<li>Acceso de red saliente para resolver DNS y consultar por HTTPS los dominios autorizados.</li>
+</ul>
+<p>El proyecto está desarrollado y compilado con:</p>
+<ul>
+<li>TypeScript <code>5.9.x</code>.</li>
+<li>Target <code>ES2022</code>.</li>
+<li>Módulos CommonJS.</li>
+<li>Jest <code>30.x</code> y <code>ts-jest</code> para pruebas.</li>
+</ul>
+<h3 id="dependencias-de-ejecución" class="tsd-anchor-link">Dependencias de ejecución<a href="#dependencias-de-ejecución" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li><code>dotenv</code>: configuración desde <code>.env</code>.</li>
+<li><code>mysql2</code>: conexión y transacciones con MySQL.</li>
+<li><code>pino</code>: logging estructurado.</li>
+</ul>
+<p>Las versiones exactas y las integridades se controlan mediante <code>package-lock.json</code>.</p>
+<h3 id="lenguajes" class="tsd-anchor-link">Lenguajes<a href="#lenguajes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ul>
+<li>TypeScript como lenguaje principal.</li>
+<li>JavaScript CommonJS generado en <code>dist/</code>.</li>
+<li>SQL para consultas y persistencia en MySQL.</li>
+<li>JSON para resúmenes de capas, evidencias y configuración.</li>
+</ul>
+<h2 id="instalación" class="tsd-anchor-link">Instalación<a href="#instalación" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">git</span><span class="hl-1"> </span><span class="hl-2">clone</span><span class="hl-1"> </span><span class="hl-2">https://github.com/DeviD0527/cyberscore-worker.git</span><br/><span class="hl-0">cd</span><span class="hl-1"> </span><span class="hl-2">cyberscore-worker</span><br/><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">ci</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Configure el esquema de base de datos de CyberScore antes de iniciar el worker. Use <code>.env.example</code> como plantilla:</p>
+<pre><code class="bash"><span class="hl-0">copy</span><span class="hl-1"> </span><span class="hl-2">.env.example</span><span class="hl-1"> </span><span class="hl-2">.env</span>
+</code><button type="button">Copy</button></pre>
+
+<p>En Linux o macOS, el equivalente es:</p>
+<pre><code class="bash"><span class="hl-0">cp</span><span class="hl-1"> </span><span class="hl-2">.env.example</span><span class="hl-1"> </span><span class="hl-2">.env</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Después, complete las credenciales y los dominios permitidos en <code>.env</code>.</p>
+<h2 id="configuración" class="tsd-anchor-link">Configuración<a href="#configuración" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th style="text-align:right">Obligatoria</th>
+<th style="text-align:right">Valor predeterminado</th>
+<th>Descripción</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NODE_ENV</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>development</code></td>
+<td><code>development</code>, <code>test</code> o <code>production</code>.</td>
+</tr>
+<tr>
+<td><code>LOG_LEVEL</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>info</code></td>
+<td><code>fatal</code>, <code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code> o <code>silent</code>.</td>
+</tr>
+<tr>
+<td><code>DB_HOST</code></td>
+<td style="text-align:right">Sí</td>
+<td style="text-align:right">—</td>
+<td>Host de MySQL.</td>
+</tr>
+<tr>
+<td><code>DB_PORT</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>3308</code></td>
+<td>Puerto entero entre 1 y 65535.</td>
+</tr>
+<tr>
+<td><code>DB_NAME</code></td>
+<td style="text-align:right">Sí</td>
+<td style="text-align:right">—</td>
+<td>Base de datos del sistema.</td>
+</tr>
+<tr>
+<td><code>DB_USER</code></td>
+<td style="text-align:right">Sí</td>
+<td style="text-align:right">—</td>
+<td>Usuario de MySQL.</td>
+</tr>
+<tr>
+<td><code>DB_PASSWORD</code></td>
+<td style="text-align:right">Sí</td>
+<td style="text-align:right">—</td>
+<td>Contraseña de MySQL.</td>
+</tr>
+<tr>
+<td><code>WORKER_POLL_INTERVAL_MS</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>5000</code></td>
+<td>Espera cuando no hay evaluaciones, en milisegundos.</td>
+</tr>
+<tr>
+<td><code>WORKER_BATCH_SIZE</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>1</code></td>
+<td>Máximo de evaluaciones procesadas por ciclo.</td>
+</tr>
+<tr>
+<td><code>ALLOWED_DOMAINS</code></td>
+<td style="text-align:right">Condicional</td>
+<td style="text-align:right">—</td>
+<td>Lista de dominios separada por comas. Es obligatoria fuera del modo demo.</td>
+</tr>
+<tr>
+<td><code>ALLOW_ANY_PUBLIC_DOMAIN</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right"><code>false</code></td>
+<td>Permite cualquier dominio público; solo para desarrollo/demo.</td>
+</tr>
+<tr>
+<td><code>VIRUSTOTAL_API_KEY</code></td>
+<td style="text-align:right">No</td>
+<td style="text-align:right">—</td>
+<td>Reservada para una integración autorizada; no es necesaria para el flujo actual.</td>
+</tr>
+</tbody>
+</table>
+<p>Ejemplo mínimo:</p>
+<pre><code class="dotenv">NODE_ENV=production
+LOG_LEVEL=info
+DB_HOST=localhost
+DB_PORT=3308
+DB_NAME=cyberscore_pyme
+DB_USER=cyberscore_worker
+DB_PASSWORD=coloque_un_secreto_seguro
+WORKER_POLL_INTERVAL_MS=5000
+WORKER_BATCH_SIZE=1
+ALLOWED_DOMAINS=empresa-ejemplo.com,otro-dominio.com
+ALLOW_ANY_PUBLIC_DOMAIN=false
+</code><button type="button">Copy</button></pre>
+
+<p>No agregue <code>.env</code> al control de versiones ni incluya credenciales reales en documentación, logs o commits.</p>
+<h2 id="uso" class="tsd-anchor-link">Uso<a href="#uso" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<h3 id="desarrollo" class="tsd-anchor-link">Desarrollo<a href="#desarrollo" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Ejecuta TypeScript directamente con <code>ts-node</code>:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">dev</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="producción" class="tsd-anchor-link">Producción<a href="#producción" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<p>Compile y ejecute el JavaScript generado:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">build</span><br/><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">start</span>
+</code><button type="button">Copy</button></pre>
+
+<p>El proceso permanece activo mientras consulta la cola. Para detenerlo, envíe <code>SIGINT</code> o <code>SIGTERM</code>; el worker cerrará el pool de MySQL antes de finalizar.</p>
+<h3 id="scripts-disponibles" class="tsd-anchor-link">Scripts disponibles<a href="#scripts-disponibles" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>Comando</th>
+<th>Propósito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>npm run build</code></td>
+<td>Compilar <code>src/</code> en <code>dist/</code> con declaraciones y source maps.</td>
+</tr>
+<tr>
+<td><code>npm start</code></td>
+<td>Ejecutar <code>dist/index.js</code>.</td>
+</tr>
+<tr>
+<td><code>npm run dev</code></td>
+<td>Ejecutar <code>src/index.ts</code> con <code>ts-node</code>.</td>
+</tr>
+<tr>
+<td><code>npm test</code></td>
+<td>Ejecutar todas las pruebas una vez.</td>
+</tr>
+<tr>
+<td><code>npm run test:watch</code></td>
+<td>Ejecutar Jest en modo observación.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="restricciones-de-uso-y-seguridad" class="tsd-anchor-link">Restricciones de uso y seguridad<a href="#restricciones-de-uso-y-seguridad" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li>Use el worker únicamente sobre dominios propios o con autorización explícita del propietario.</li>
+<li><code>ALLOWED_DOMAINS</code> debe limitarse al alcance autorizado. No habilite <code>ALLOW_ANY_PUBLIC_DOMAIN=true</code> en producción: la configuración lo rechaza.</li>
+<li>Aunque el modo demo permite cualquier dominio público, no convierte el sistema en una herramienta de pentesting ni autoriza evaluaciones de terceros.</li>
+<li>Solo se aceptan nombres de dominio válidos; no se permiten URL completas, rutas, puertos, credenciales embebidas ni espacios.</li>
+<li>El destino debe resolver a direcciones IP públicas. Se bloquean redes privadas, loopback, link-local, multicast, reservadas y de documentación.</li>
+<li>El worker no debe exponerse directamente a Internet ni ejecutarse con credenciales MySQL administrativas.</li>
+<li>Las credenciales y API keys deben entregarse mediante variables de entorno o un gestor de secretos.</li>
+<li>Un score alto significa que no se encontraron hallazgos dentro del alcance evaluado; no representa ausencia absoluta de vulnerabilidades.</li>
+<li>El análisis no sustituye una auditoría de seguridad, una prueba de penetración ni una revisión de cumplimiento.</li>
+</ul>
+<h2 id="estados-de-una-evaluación" class="tsd-anchor-link">Estados de una evaluación<a href="#estados-de-una-evaluación" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="text">queued -&gt; running -&gt; done
+                 \-&gt; failed
+</code><button type="button">Copy</button></pre>
+
+<ul>
+<li><code>queued</code>: lista para ser reclamada.</li>
+<li><code>running</code>: tomada por el worker y en proceso.</li>
+<li><code>done</code>: análisis, score, hallazgos e historial guardados.</li>
+<li><code>failed</code>: ocurrió un error durante el procesamiento.</li>
+</ul>
+<h2 id="pruebas" class="tsd-anchor-link">Pruebas<a href="#pruebas" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Ejecute:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">test</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Para comprobar también la compilación:</p>
+<pre><code class="bash"><span class="hl-0">npm</span><span class="hl-1"> </span><span class="hl-2">run</span><span class="hl-1"> </span><span class="hl-2">build</span>
+</code><button type="button">Copy</button></pre>
+
+<p>Las pruebas usan Jest y cubren configuración, base de datos, validación de objetivos, inspectores, analizadores, cálculo de score y procesamiento del worker. Para las pruebas de integración se requiere una configuración de MySQL compatible y variables de entorno válidas.</p>
+<h2 id="estructura-del-proyecto" class="tsd-anchor-link">Estructura del proyecto<a href="#estructura-del-proyecto" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="text">src/
+├── config/       # Configuración y validación del entorno
+├── database/     # Pool y conexión MySQL
+├── jobs/         # Cola, procesamiento y persistencia
+├── scoring/      # Fórmula, matriz y nivel de riesgo
+├── security/     # Validación y análisis de seguridad
+├── services/     # Inspectores DNS/HTTP/TLS
+└── index.ts      # Punto de entrada del worker
+test/             # Pruebas automatizadas
+.env.example      # Plantilla de configuración
+</code><button type="button">Copy</button></pre>
+
+<h2 id="operación-y-soporte" class="tsd-anchor-link">Operación y soporte<a href="#operación-y-soporte" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Para dar soporte sin depender del autor original:</p>
+<ol>
+<li>Revise primero el nivel de log configurado y la salida estructurada de Pino.</li>
+<li>Verifique que <code>DB_HOST</code>, <code>DB_PORT</code>, <code>DB_NAME</code>, <code>DB_USER</code> y <code>DB_PASSWORD</code> sean correctos.</li>
+<li>Compruebe la conectividad a MySQL y que existan las tablas <code>evaluaciones</code>, <code>pymes</code>, <code>hallazgos</code> e <code>historial_scores</code>.</li>
+<li>Confirme que las evaluaciones estén en <code>queued</code> y que sus datos económicos usen una moneda soportada: <code>COP</code>, <code>USD</code>, <code>EUR</code> o <code>MXN</code>.</li>
+<li>Compruebe DNS, HTTPS/TLS y conectividad saliente hacia los dominios autorizados.</li>
+<li>Si una evaluación falla, consulte el error registrado y verifique que haya pasado a <code>failed</code>.</li>
+<li>Antes de cambiar la fórmula, la matriz o el esquema, ejecute <code>npm test</code> y <code>npm run build</code>.</li>
+</ol>
+<p>Las decisiones metodológicas del score se documentan en <code>src/scoring/</code>, y las reglas de validación y seguridad de red en <code>src/security/</code>. Cualquier modificación debe conservar sus pruebas correspondientes.</p>
+<h2 id="contribución" class="tsd-anchor-link">Contribución<a href="#contribución" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ol>
+<li>Cree una rama para el cambio.</li>
+<li>Mantenga los tipos estrictos y siga la estructura existente.</li>
+<li>Agregue o actualice pruebas para el comportamiento modificado.</li>
+<li>Ejecute <code>npm test</code> y <code>npm run build</code>.</li>
+<li>Abra un pull request describiendo el cambio, su impacto y la configuración requerida.</li>
+</ol>
+<p>No incluya secretos, archivos <code>.env</code>, <code>node_modules/</code>, <code>dist/</code> ni reportes de cobertura en los commits.</p>
+<h2 id="licencia" class="tsd-anchor-link">Licencia<a href="#licencia" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Este proyecto declara licencia <code>ISC</code> en <code>package.json</code>. Consulte ese archivo para los términos aplicables.</p>
+</div></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#cyberscore-worker"><span>Cyber<wbr/>Score <wbr/>Worker</span></a>
+<ul>
+<li><a href="#tabla-de-contenidos"><span>Tabla de contenidos</span></a></li>
+<li><a href="#objetivo"><span>Objetivo</span></a></li>
+<li><a href="#características"><span>Características</span></a></li>
+<li><a href="#arquitectura-técnica"><span>Arquitectura técnica</span></a></li>
+<li>
+<ul>
+<li><a href="#componentes"><span>Componentes</span></a></li>
+<li><a href="#flujo-de-datos"><span>Flujo de datos</span></a></li></ul></li>
+<li><a href="#requisitos"><span>Requisitos</span></a></li>
+<li>
+<ul>
+<li><a href="#software"><span>Software</span></a></li>
+<li><a href="#dependencias-de-ejecución"><span>Dependencias de ejecución</span></a></li>
+<li><a href="#lenguajes"><span>Lenguajes</span></a></li></ul></li>
+<li><a href="#instalación"><span>Instalación</span></a></li>
+<li><a href="#configuración"><span>Configuración</span></a></li>
+<li><a href="#uso"><span>Uso</span></a></li>
+<li>
+<ul>
+<li><a href="#desarrollo"><span>Desarrollo</span></a></li>
+<li><a href="#producción"><span>Producción</span></a></li>
+<li><a href="#scripts-disponibles"><span>Scripts disponibles</span></a></li></ul></li>
+<li><a href="#restricciones-de-uso-y-seguridad"><span>Restricciones de uso y seguridad</span></a></li>
+<li><a href="#estados-de-una-evaluación"><span>Estados de una evaluación</span></a></li>
+<li><a href="#pruebas"><span>Pruebas</span></a></li>
+<li><a href="#estructura-del-proyecto"><span>Estructura del proyecto</span></a></li>
+<li><a href="#operación-y-soporte"><span>Operación y soporte</span></a></li>
+<li><a href="#contribución"><span>Contribución</span></a></li>
+<li><a href="#licencia"><span>Licencia</span></a></li></ul></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="modules.html">cyberscore-worker</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

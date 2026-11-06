@@ -1,10 +1,26 @@
-import { describe, it, expect } from '@jest/globals';
+import {
+    afterEach,
+    describe,
+    it,
+    expect,
+    jest,
+} from '@jest/globals';
 
 import {
     calculateEvaluationScore,
 } from '../src/scoring/cyberscore-calculator';
 
+import * as scoringEngine from '../src/scoring/scoring-engine';
+
+import type {
+    EvaluationScoreInput,
+} from '../src/scoring/cyberscore-calculator';
+
 describe('CyberScoreCalculator', () => {
+
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
 
     const businessContext = {
         monthlyRevenue: 30_000_000,
@@ -201,4 +217,132 @@ describe('CyberScoreCalculator', () => {
             }),
         ).toThrow();
     });
+
+    // =====================================================
+// CLASIFICACIÓN DE RIESGO
+// =====================================================
+
+    it.each([
+        { score: 100, level: 'Bajo' },
+        { score: 80, level: 'Bajo' },
+        { score: 79, level: 'Moderado' },
+        { score: 60, level: 'Moderado' },
+        { score: 59, level: 'Alto' },
+        { score: 40, level: 'Alto' },
+        { score: 39, level: 'Crítico' },
+        { score: 0, level: 'Crítico' },
+    ])(
+        'clasifica una puntuación de $score como $level',
+        ({ score, level }) => {
+
+            jest.spyOn(
+                scoringEngine,
+                'calculateCyberScore',
+            ).mockReturnValue({
+                score,
+                riskIndex: 1 - score / 100,
+                formulaVersion: '1.0',
+            });
+
+            const result = calculateEvaluationScore({
+                findings,
+                businessContext,
+                layersSummary,
+            });
+
+            expect(result.score).toBe(score);
+            expect(result.level).toBe(level);
+        },
+    );
+
+    // =====================================================
+// VALIDACIONES DE ENTRADA
+// =====================================================
+
+    it('rechaza una entrada nula', () => {
+
+        expect(() =>
+            calculateEvaluationScore(
+                null as unknown as EvaluationScoreInput,
+            ),
+        ).toThrow(
+            'Los datos de la evaluación son obligatorios.',
+        );
+    });
+
+    it('rechaza una entrada sin lista de hallazgos', () => {
+
+        expect(() =>
+            calculateEvaluationScore({
+                findings: null as unknown as EvaluationScoreInput['findings'],
+                businessContext,
+                layersSummary,
+            }),
+        ).toThrow(TypeError);
+    });
+
+    it('rechaza un resumen de capas nulo', () => {
+
+        expect(() =>
+            calculateEvaluationScore({
+                findings,
+                businessContext,
+                layersSummary: null as unknown as Record<string, unknown>,
+            }),
+        ).toThrow(
+            'El resumen de las capas no es válido.',
+        );
+    });
+
+    it('rechaza un resumen de capas que sea un array', () => {
+
+        expect(() =>
+            calculateEvaluationScore({
+                findings,
+                businessContext,
+                layersSummary: [] as unknown as Record<string, unknown>,
+            }),
+        ).toThrow(
+            'El resumen de las capas no es válido.',
+        );
+    });
+
+
+    it.each([
+        {
+            description: 'una capa nula',
+            result: null,
+        },
+        {
+            description: 'una capa con un valor primitivo',
+            result: 'invalid',
+        },
+        {
+            description: 'una capa sin propiedad status',
+            result: {},
+        },
+        {
+            description: 'una capa sin finalizar',
+            result: { status: 'running' },
+        },
+    ])(
+        'rechaza una evaluación cuando DNS contiene $description',
+        ({ result }) => {
+        
+            expect(() =>
+                calculateEvaluationScore({
+                    findings,
+                    businessContext,
+                    layersSummary: {
+                        dns: result,
+                        tls: { status: 'completed' },
+                        headers: { status: 'completed' },
+                    },
+                }),
+            ).toThrow(
+                'La capa dns no terminó correctamente. No se puede calcular un CyberScore definitivo.',
+            );
+        },
+    );
+
 });

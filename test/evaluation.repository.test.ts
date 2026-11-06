@@ -285,4 +285,107 @@ describe('EvaluationRepository', () => {
         expect(mockConnection.release).toHaveBeenCalledTimes(1);
     });
 
+    describe('Validación de horas operativas', () => {
+
+        it.each([
+            {
+                description: 'horas fraccionarias',
+                hours: 7.5,
+            },
+            {
+                description: 'horas menores que 1',
+                hours: 0,
+            },
+            {
+                description: 'horas superiores a 744',
+                hours: 745,
+            },
+        ])(
+            'rechaza $description',
+            async ({ hours }) => {
+
+                mockConnection.query.mockResolvedValue([
+                    [
+                        {
+                            id: 'evaluation-123',
+                            pyme_id: 'pyme-456',
+                            dominio: 'example.com',
+                            ingresos_mensuales: '30000000.00',
+                            horas_operativas: hours,
+                            moneda: 'COP',
+                        },
+                    ],
+                    [],
+                ]);
+
+                await expect(
+                    repository.claimNext(),
+                ).rejects.toThrow(
+                    'Las horas operativas de la PYME pyme-456 no son válidas.',
+                );
+
+                expect(mockConnection.execute).not.toHaveBeenCalled();
+                expect(mockConnection.rollback).toHaveBeenCalledTimes(1);
+                expect(mockConnection.release).toHaveBeenCalledTimes(1);
+            },
+        );
+    });
+
+    describe('Validación de moneda', () => {
+
+        it('rechaza una moneda nula', async () => {
+
+            mockConnection.query.mockResolvedValue([
+                [
+                    {
+                        id: 'evaluation-123',
+                        pyme_id: 'pyme-456',
+                        dominio: 'example.com',
+                        ingresos_mensuales: '30000000.00',
+                        horas_operativas: 300,
+                        moneda: null,
+                    },
+                ],
+                [],
+            ]);
+
+            await expect(
+                repository.claimNext(),
+            ).rejects.toThrow(
+                'La moneda de la PYME pyme-456 no es válida.',
+            );
+
+            expect(mockConnection.execute).not.toHaveBeenCalled();
+            expect(mockConnection.rollback).toHaveBeenCalledTimes(1);
+            expect(mockConnection.release).toHaveBeenCalledTimes(1);
+        });
+
+        it('rechaza monedas no soportadas', async () => {
+
+            mockConnection.query.mockResolvedValue([
+                [
+                    {
+                        id: 'evaluation-123',
+                        pyme_id: 'pyme-456',
+                        dominio: 'example.com',
+                        ingresos_mensuales: '30000000.00',
+                        horas_operativas: 300,
+                        moneda: 'GBP',
+                    },
+                ],
+                [],
+            ]);
+
+            await expect(
+                repository.claimNext(),
+            ).rejects.toThrow(
+                'La moneda de la PYME pyme-456 no es válida.',
+            );
+
+            expect(mockConnection.execute).not.toHaveBeenCalled();
+            expect(mockConnection.rollback).toHaveBeenCalledTimes(1);
+            expect(mockConnection.release).toHaveBeenCalledTimes(1);
+        });
+    });
+
 });

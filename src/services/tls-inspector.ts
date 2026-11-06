@@ -52,8 +52,7 @@ export class TlsInspector {
         const target = await this.validator.validate(normalizedDomain);
 
         if (
-            !target ||
-            !target.hostname ||
+            !target?.hostname ||
             !Array.isArray(target.addresses) ||
             target.addresses.length === 0
         ) {

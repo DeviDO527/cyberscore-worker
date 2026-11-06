@@ -61,8 +61,21 @@ export class EvaluationResultRepository {
                 'No fue posible completar la evaluación.',
             );
 
-            // 2. Persistir los hallazgos.
-            for (const finding of result.findings) {
+            // 2. Persistir los hallazgos en una sola operación.
+            if (result.findings.length > 0) {
+                const placeholders = result.findings
+                    .map(() => '(?, ?, ?, ?, ?, ?, ?)')
+                    .join(', ');
+                const findingValues = result.findings.flatMap(finding => [
+                    randomUUID(),
+                    result.evaluationId.trim(),
+                    finding.layer.trim(),
+                    this.normalizeSeverity(finding.severity),
+                    finding.title.trim(),
+                    finding.description.trim(),
+                    finding.evidence ?? null,
+                ]);
+
                 const [findingResult] =
                     await connection.execute<ResultSetHeader>(
                         `INSERT INTO hallazgos
@@ -75,21 +88,14 @@ export class EvaluationResultRepository {
                              descripcion,
                              evidencia
                          )
-                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                        [
-                            randomUUID(),
-                            result.evaluationId.trim(),
-                            finding.layer.trim(),
-                            this.normalizeSeverity(finding.severity),
-                            finding.title.trim(),
-                            finding.description.trim(),
-                            finding.evidence ?? null,
-                        ],
+                         VALUES ${placeholders}`,
+                        findingValues,
                     );
 
-                this.ensureOneRowUpdated(
+                this.ensureExpectedRowsUpdated(
                     findingResult,
-                    'No fue posible guardar un hallazgo.',
+                    result.findings.length,
+                    'No fue posible guardar todos los hallazgos.',
                 );
             }
 
@@ -122,10 +128,7 @@ export class EvaluationResultRepository {
 
         } catch (error) {
             if (transactionStarted) {
-                await this.rollbackPreservingOriginalError(
-                    connection,
-                    error,
-                );
+                await this.rollbackPreservingOriginalError(connection);
             }
 
             throw error;
@@ -165,10 +168,7 @@ export class EvaluationResultRepository {
 
         } catch (error) {
             if (transactionStarted) {
-                await this.rollbackPreservingOriginalError(
-                    connection,
-                    error,
-                );
+                await this.rollbackPreservingOriginalError(connection);
             }
 
             throw error;
@@ -204,7 +204,7 @@ export class EvaluationResultRepository {
         }
 
         if (!Array.isArray(result.findings)) {
-            throw new Error('Los hallazgos deben proporcionarse como una lista.');
+            throw new TypeError('Los hallazgos deben proporcionarse como una lista.');
         }
 
         for (const finding of result.findings) {
@@ -314,9 +314,18 @@ export class EvaluationResultRepository {
         }
     }
 
+    private ensureExpectedRowsUpdated(
+        result: ResultSetHeader,
+        expectedRows: number,
+        message: string,
+    ): void {
+        if (result.affectedRows !== expectedRows) {
+            throw new Error(message);
+        }
+    }
+
     private async rollbackPreservingOriginalError(
         connection: PoolConnection,
-        originalError: unknown,
     ): Promise<void> {
         try {
             await connection.rollback();
@@ -324,6 +333,5 @@ export class EvaluationResultRepository {
             // Conservamos el error original de la operación.
         }
 
-        void originalError;
     }
 }

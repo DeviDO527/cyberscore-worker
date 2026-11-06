@@ -138,7 +138,7 @@ function parseAllowedDomains(
 ): string[] {
     const rawValue = process.env.ALLOWED_DOMAINS;
 
-    if (!rawValue || !rawValue.trim()) {
+    if (!rawValue?.trim()) {
         if (!allowAnyPublicDomain) {
             throw new Error(
                 'ALLOWED_DOMAINS es obligatorio cuando el modo de demostración está desactivado.',

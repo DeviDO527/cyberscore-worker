@@ -279,4 +279,41 @@ describe('SecurityAnalyzer', () => {
         );
     });
 
+    it('asigna la capa y conserva evidencia de los hallazgos DNS', async () => {
+
+        const dnsFinding = {
+            title: 'Configuración DNS detectada',
+            severity: 'medium',
+            description: 'Se detectó una configuración DNS que requiere revisión.',
+        };
+    
+        dnsAnalyzer.analyze.mockResolvedValue({
+            ...dnsResult,
+            findings: [dnsFinding],
+        });
+    
+        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
+    
+        headersAnalyzer.analyze.mockResolvedValue({
+            ...headersResult,
+            findings: [],
+        });
+    
+        const result = await analyzer.analyze(domain);
+    
+        expect(result.findings).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    layer: 'dns',
+                    title: 'Configuración DNS detectada',
+                    severity: 'medium',
+                    description: 'Se detectó una configuración DNS que requiere revisión.',
+                    evidence: JSON.stringify({
+                        records: dnsResult.records,
+                    }),
+                }),
+            ]),
+        );
+    });
+
 });

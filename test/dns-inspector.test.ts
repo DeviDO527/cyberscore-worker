@@ -25,6 +25,12 @@ describe('DnsInspector', () => {
         inspector = new DnsInspector(resolverMock);
     });
 
+    it('crea el resolver predeterminado cuando no se inyecta uno', () => {
+        const defaultInspector = new DnsInspector();
+
+        expect(defaultInspector).toBeInstanceOf(DnsInspector);
+    });
+
     it('consulta los registros A, AAAA, MX y NS', async () => {
         resolverMock.resolve4.mockResolvedValue(['203.0.113.10']);
         resolverMock.resolve6.mockResolvedValue(['2001:db8::10']);

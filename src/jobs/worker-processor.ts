@@ -1,5 +1,7 @@
-import type { EvaluationResult } from './evaluation-result.repository';
-import type { FindingToPersist } from './evaluation-result.repository';
+import type {
+    EvaluationResult,
+    FindingToPersist,
+} from './evaluation-result.repository';
 
 import type { PendingEvaluation } from './evaluation.repository';
 
