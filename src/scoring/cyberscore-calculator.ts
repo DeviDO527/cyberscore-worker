@@ -1,3 +1,4 @@
+
 import {
     calculateCyberScore,
     CYBERSCORE_FORMULA_VERSION,
@@ -21,10 +22,47 @@ import type {
 // ENTRADA DEL CALCULADOR
 // =====================================================
 
+export interface WhoisScoringInput {
+    status: 'completed' | 'failed';
+    daysUntilExpiration: number;
+}
+
+export interface VirusTotalScoringInput {
+    status: 'completed' | 'unavailable' | 'failed';
+
+    stats: {
+        malicious: number;
+        suspicious: number;
+        harmless: number;
+    };
+}
+
+export interface NmapScoringPort {
+    port: number;
+    protocol: string;
+    state: string;
+    serviceDetails: string;
+}
+
+export interface NmapScoringInput {
+    status: string;
+    openPorts: NmapScoringPort[];
+}
+
+export interface NmapPenaltyBreakdown {
+    sensitivePortCount: number;
+    sensitivePenalty: number;
+    nonStandardPortCount: number;
+    nonStandardPenalty: number;
+}
+
 export interface EvaluationScoreInput {
     findings: FindingToAssess[];
     businessContext: BusinessEconomicContext;
     layersSummary: Record<string, unknown>;
+    whois?: WhoisScoringInput;
+    virusTotal?: VirusTotalScoringInput;
+    nmap?: NmapScoringInput;
 }
 
 // =====================================================
@@ -34,11 +72,21 @@ export interface EvaluationScoreInput {
 export interface EvaluationScoreResult {
     score: number;
     rawScore: number;
+    baseScore: number;
+
     riskIndex: number;
+    baseRiskIndex: number;
+
+    whoisPenalty: number;
+    virusTotalPenalty: number;
+    nmapPenalty: number;
+    nmapPenaltyBreakdown: NmapPenaltyBreakdown;
+
+    virusTotalReputation: string;
+
     level: string;
 
     assessments: FindingRiskAssessment[];
-
     findings: FindingToAssess[];
 
     formulaVersion: string;
@@ -109,6 +157,96 @@ function validateLayersSummary(
 }
 
 // =====================================================
+// VALIDACIÓN DE CONTADORES DE VIRUSTOTAL
+// =====================================================
+
+function normalizeVirusTotalCount(value: number): number {
+    if (
+        typeof value !== 'number' ||
+        !Number.isFinite(value)
+    ) {
+        return 0;
+    }
+
+    return Math.max(0, Math.floor(value));
+}
+
+const NMAP_SENSITIVE_PORTS = new Set([
+    21,   // FTP
+    22,   // SSH
+    23,   // Telnet
+    3306, // MySQL
+    3389, // RDP
+]);
+
+const NMAP_SENSITIVE_PORT_PENALTY = 20;
+const NMAP_NON_STANDARD_PORT_PENALTY = 10;
+
+function calculateNmapPenalty(
+    nmap: NmapScoringInput | undefined,
+): {
+    penalty: number;
+    breakdown: NmapPenaltyBreakdown;
+} {
+    const breakdown: NmapPenaltyBreakdown = {
+        sensitivePortCount: 0,
+        sensitivePenalty: 0,
+        nonStandardPortCount: 0,
+        nonStandardPenalty: 0,
+    };
+
+    if (nmap?.status !== 'completed') {
+        return { penalty: 0, breakdown };
+    }
+
+    if (!Array.isArray(nmap.openPorts)) {
+        throw new TypeError(
+            'Los puertos abiertos de Nmap deben proporcionarse como una lista.',
+        );
+    }
+
+    for (const port of nmap.openPorts) {
+        if (!port || typeof port !== 'object') {
+            throw new Error('El puerto Nmap proporcionado no es válido.');
+        }
+
+        if (port.state !== 'open') {
+            continue;
+        }
+
+        if (
+            !Number.isInteger(port.port) ||
+            port.port < 1 ||
+            port.port > 65_535 ||
+            typeof port.protocol !== 'string' ||
+            !port.protocol.trim() ||
+            typeof port.serviceDetails !== 'string'
+        ) {
+            throw new Error(
+                'El hallazgo de puerto Nmap no contiene datos válidos.',
+            );
+        }
+
+        if (NMAP_SENSITIVE_PORTS.has(port.port)) {
+            breakdown.sensitivePortCount++;
+            breakdown.sensitivePenalty +=
+                NMAP_SENSITIVE_PORT_PENALTY;
+        } else if (port.port !== 80 && port.port !== 443) {
+            breakdown.nonStandardPortCount++;
+            breakdown.nonStandardPenalty +=
+                NMAP_NON_STANDARD_PORT_PENALTY;
+        }
+    }
+
+    return {
+        penalty:
+            breakdown.sensitivePenalty +
+            breakdown.nonStandardPenalty,
+        breakdown,
+    };
+}
+
+// =====================================================
 // CALCULADOR GENERAL DE CYBERSCORE
 // =====================================================
 
@@ -143,54 +281,134 @@ export function calculateEvaluationScore(
         );
 
     // =================================================
-    // 2. CALCULAR EL ÍNDICE GENERAL Y EL CYBERSCORE
+    // 2. CALCULAR LA PUNTUACIÓN BASE
     // =================================================
 
-    let rawScore: number;
-    let riskIndex: number;
+    let baseRawScore: number;
+    let baseRiskIndex: number;
 
     if (assessments.length === 0) {
-
-        // Convención operativa CyberScore:
-        // si todas las capas terminaron correctamente
+        // Si todas las capas finalizaron correctamente
         // y no existen hallazgos, se asigna 100.
 
-        rawScore = 100;
-        riskIndex = 0;
+        baseRawScore = 100;
+        baseRiskIndex = 0;
 
     } else {
-
         const scoringResult = calculateCyberScore(
             assessments.map(assessment => assessment.risk),
         );
 
-        rawScore = scoringResult.score;
-        riskIndex = scoringResult.riskIndex;
+        baseRawScore = scoringResult.score;
+        baseRiskIndex = scoringResult.riskIndex;
     }
 
     // =================================================
-    // 3. REDONDEAR LA PUNTUACIÓN
+    // 3. PENALIZACIÓN WHOIS
     // =================================================
+
+    const daysUntilExpiration =
+        input.whois?.daysUntilExpiration;
+
+    const whoisPenalty =
+        input.whois?.status === 'completed' &&
+        typeof daysUntilExpiration === 'number' &&
+        Number.isFinite(daysUntilExpiration) &&
+        daysUntilExpiration > 0 &&
+        daysUntilExpiration < 30
+            ? 15
+            : 0;
+
+    // =================================================
+    // 4. PENALIZACIÓN VIRUSTOTAL
+    // =================================================
+
+    const maliciousCount = normalizeVirusTotalCount(
+        input.virusTotal?.stats.malicious ?? 0,
+    );
+
+    const suspiciousCount = normalizeVirusTotalCount(
+        input.virusTotal?.stats.suspicious ?? 0,
+    );
+
+    const harmlessCount = normalizeVirusTotalCount(
+        input.virusTotal?.stats.harmless ?? 0,
+    );
+
+    const totalVirusTotalAlerts =
+        maliciousCount + suspiciousCount;
+
+    // La penalización solo se aplica cuando la consulta
+    // VirusTotal terminó correctamente.
+
+    const virusTotalPenalty =
+        input.virusTotal?.status === 'completed'
+            ? totalVirusTotalAlerts * 25
+            : 0;
+
+    const {
+        penalty: nmapPenalty,
+        breakdown: nmapPenaltyBreakdown,
+    } = calculateNmapPenalty(input.nmap);
+
+    // =================================================
+    // 5. TEXTO DE REPUTACIÓN VIRUSTOTAL
+    // =================================================
+
+    let virusTotalReputation = 'Consulta no disponible';
+
+    if (input.virusTotal?.status === 'completed') {
+        if (totalVirusTotalAlerts > 0) {
+            virusTotalReputation =
+                `¡ALERTA CRÍTICA! Marcado por ${totalVirusTotalAlerts} motores de seguridad.`;
+        } else {
+            virusTotalReputation =
+                `Dominio Limpio (Confirmado por ${harmlessCount} motores de seguridad).`;
+        }
+    }
+
+    // =================================================
+    // 6. CALCULAR LA PUNTUACIÓN FINAL
+    // =================================================
+
+    const baseScore = Math.round(baseRawScore);
+
+    const totalPenalty =
+        whoisPenalty + virusTotalPenalty + nmapPenalty;
+
+    const rawScore = Math.max(
+        baseRawScore - totalPenalty,
+        0,
+    );
 
     const score = Math.round(rawScore);
 
+    const riskIndex = 1 - rawScore / 100;
+
     // =================================================
-    // 4. DETERMINAR EL NIVEL DE RIESGO
+    // 7. DETERMINAR EL NIVEL DE RIESGO
     // =================================================
 
     const level = determineRiskLevel(score);
 
     // =================================================
-    // 5. CONSOLIDAR LOS SUPUESTOS METODOLÓGICOS
+    // 8. CONSOLIDAR LOS SUPUESTOS METODOLÓGICOS
     // =================================================
 
     const assumptions = [
-        'Los factores de riesgo se estiman mediante la matriz CyberScore PYME v1.0.',
+        'Los factores de riesgo se estiman mediante la matriz CyberScore PYME v1.1.',
         'Los valores económicos son estimaciones derivadas de los datos registrados por la PYME.',
         'La pérdida tolerable se estima como un día promedio de ingresos, utilizando 22 días operativos mensuales.',
         'Las horas de remediación son estimaciones internas de CyberScore.',
         'No se consideran conversiones entre monedas.',
         'La puntuación representa los hallazgos identificados dentro del alcance de evaluación.',
+        'VirusTotal utiliza la cantidad de motores maliciosos y sospechosos para calcular una penalización independiente.',
+        ...(input.nmap?.status === 'completed'
+            ? [
+                'Nmap descuenta 20 puntos por cada puerto sensible abierto (21, 22, 23, 3306 y 3389) y 10 por cada otro puerto abierto, excepto 80 y 443.',
+                'La exposición de un puerto no demuestra por sí misma una vulnerabilidad ni la explotabilidad del servicio.',
+            ]
+            : []),
     ];
 
     for (const assessment of assessments) {
@@ -204,21 +422,42 @@ export function calculateEvaluationScore(
     ];
 
     // =================================================
-    // 6. CONSTRUIR EL RESUMEN METODOLÓGICO
+    // 9. CONSTRUIR EL RESUMEN METODOLÓGICO
     // =================================================
 
     const scoringSummary = {
         status: 'completed',
 
         formulaVersion: CYBERSCORE_FORMULA_VERSION,
-
         matrixVersion: FINDING_RISK_MATRIX_VERSION,
 
         estimated: true,
 
         score,
         rawScore,
+        baseScore,
+
         riskIndex,
+        baseRiskIndex,
+
+        whoisPenalty,
+        whoisStatus: input.whois?.status ?? 'not_provided',
+        whoisDaysUntilExpiration: daysUntilExpiration ?? null,
+
+        virusTotalPenalty,
+        nmapPenalty,
+        nmapStatus: input.nmap?.status ?? 'not_provided',
+        nmapPenaltyBreakdown,
+        virusTotalStatus:
+            input.virusTotal?.status ?? 'not_provided',
+        virusTotalMalicious: maliciousCount,
+        virusTotalSuspicious: suspiciousCount,
+        virusTotalHarmless: harmlessCount,
+        virusTotalTotalAlerts: totalVirusTotalAlerts,
+        virusTotalReputation,
+
+        totalPenalty,
+
         level,
 
         evaluatedFindings: assessments.length,
@@ -245,21 +484,30 @@ export function calculateEvaluationScore(
     };
 
     // =================================================
-    // 7. DEVOLVER EL RESULTADO COMPLETO
+    // 10. DEVOLVER EL RESULTADO COMPLETO
     // =================================================
 
     return {
         score,
         rawScore,
+        baseScore,
+
         riskIndex,
+        baseRiskIndex,
+
+        whoisPenalty,
+        virusTotalPenalty,
+        nmapPenalty,
+        nmapPenaltyBreakdown,
+
+        virusTotalReputation,
+
         level,
 
         assessments,
-
         findings: input.findings,
 
         formulaVersion: CYBERSCORE_FORMULA_VERSION,
-
         matrixVersion: FINDING_RISK_MATRIX_VERSION,
 
         estimated: true,

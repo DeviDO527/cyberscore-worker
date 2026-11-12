@@ -30,6 +30,10 @@ export interface WorkerConfig {
     allowedDomains: string[];
     allowAnyPublicDomain: boolean;
 
+    nmap: {
+        scanMode: 'standard' | 'deep';
+    };
+
     virusTotalApiKey?: string;
 }
 
@@ -133,18 +137,24 @@ function parseNodeEnvironment(): WorkerConfig['nodeEnv'] {
     return value as WorkerConfig['nodeEnv'];
 }
 
-function parseAllowedDomains(
-    allowAnyPublicDomain: boolean,
-): string[] {
+function parseNmapScanMode(): WorkerConfig['nmap']['scanMode'] {
+    const value =
+        process.env.NMAP_SCAN_MODE?.trim().toLowerCase() ||
+        'standard';
+
+    if (value !== 'standard' && value !== 'deep') {
+        throw new Error(
+            'NMAP_SCAN_MODE debe ser standard o deep.',
+        );
+    }
+
+    return value;
+}
+
+function parseAllowedDomains(): string[] {
     const rawValue = process.env.ALLOWED_DOMAINS;
 
     if (!rawValue?.trim()) {
-        if (!allowAnyPublicDomain) {
-            throw new Error(
-                'ALLOWED_DOMAINS es obligatorio cuando el modo de demostración está desactivado.',
-            );
-        }
-
         return [];
     }
 
@@ -170,12 +180,6 @@ function parseAllowedDomains(
         }
     }
 
-    if (domains.length === 0 && !allowAnyPublicDomain) {
-        throw new Error(
-            'Debe configurarse al menos un dominio autorizado.',
-        );
-    }
-
     return domains;
 }
 
@@ -199,11 +203,10 @@ export function loadConfig(): WorkerConfig {
         );
     }
 
-    const allowedDomains = parseAllowedDomains(
-        allowAnyPublicDomain,
-    );
+    const allowedDomains = parseAllowedDomains();
 
     const virusTotalApiKey = optionalString('VIRUSTOTAL_API_KEY');
+    const nmapScanMode = parseNmapScanMode();
 
     return {
         nodeEnv,
@@ -231,6 +234,10 @@ export function loadConfig(): WorkerConfig {
 
         allowedDomains,
         allowAnyPublicDomain,
+
+        nmap: {
+            scanMode: nmapScanMode,
+        },
 
         ...(virusTotalApiKey ? { virusTotalApiKey } : {}),
     };

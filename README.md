@@ -1,6 +1,6 @@
 # CyberScore Worker
 
-Worker asíncrono para procesar evaluaciones de seguridad de pequeñas y medianas empresas (PYMES). El proceso toma evaluaciones en cola desde MySQL, analiza el dominio en las capas DNS, TLS y cabeceras HTTP, calcula un CyberScore y guarda el resultado, los hallazgos y el historial de puntuaciones.
+Worker asíncrono para procesar evaluaciones de seguridad de pequeñas y medianas empresas (PYMES). El proceso toma evaluaciones en cola desde MySQL, analiza dominios autorizados en DNS, TLS, HTTP y Nmap, calcula un CyberScore y guarda el resultado, los hallazgos y el historial de puntuaciones.
 
 > **Estado del proyecto:** versión 1.0.0. Este componente funciona como proceso de backend y no expone una interfaz HTTP propia.
 
@@ -26,12 +26,12 @@ Worker asíncrono para procesar evaluaciones de seguridad de pequeñas y mediana
 Automatizar la evaluación técnica y económica de la postura de seguridad de un dominio autorizado, de manera desacoplada del sistema que crea las evaluaciones. El worker permite:
 
 1. Reclamar de forma transaccional una evaluación pendiente.
-2. Ejecutar análisis DNS, TLS y HTTP en paralelo.
+2. Ejecutar análisis DNS, TLS, HTTP y Nmap en paralelo.
 3. Identificar y clasificar hallazgos de seguridad.
 4. Calcular una puntuación de 0 a 100 y un nivel de riesgo.
 5. Persistir el resultado de forma atómica en MySQL.
 
-El score se calcula con la versión de fórmula `1.0` y la matriz de riesgo definida en el código. Las estimaciones económicas usan los ingresos, horas operativas y moneda registrados para la PYME.
+El score se calcula con la versión de fórmula `1.1` y la matriz de riesgo definida en el código. Las estimaciones económicas usan los ingresos, horas operativas y moneda registrados para la PYME. La versión 1.1 incorpora las penalizaciones de puertos Nmap del worker Python: 20 puntos por cada puerto abierto 21, 22, 23, 3306 o 3389; 10 por cada otro puerto abierto, excepto 80 y 443. Si Nmap no se ejecuta o falla, no se aplica esa penalización. Un puerto expuesto no se presenta como una vulnerabilidad confirmada.
 
 ## Características
 
@@ -39,6 +39,7 @@ El score se calcula con la versión de fórmula `1.0` y la matriz de riesgo defi
 - Pool de conexiones MySQL y transacciones para reclamar y completar evaluaciones.
 - Validación de dominios y bloqueo de direcciones IP privadas, reservadas o no públicas.
 - Análisis de registros DNS, certificado/protocolo TLS y cabeceras de seguridad HTTP.
+- Análisis Nmap de puertos y versiones de servicios en dominios expresamente autorizados.
 - Evidencia limitada a datos relevantes; no se almacenan cabeceras potencialmente sensibles como cookies.
 - Logging estructurado con Pino.
 - Cierre ordenado ante `SIGINT` y `SIGTERM`.
@@ -55,6 +56,7 @@ flowchart LR
     DNS[DNS Analyzer]
     TLS[TLS Analyzer]
     HTTP[Headers Analyzer]
+    NMAP[Nmap Inspector y Analyzer]
     SC[Scoring Engine]
     RR[EvaluationResultRepository]
     EXT[Dominios públicos autorizados]
@@ -65,10 +67,13 @@ flowchart LR
     SA --> DNS
     SA --> TLS
     SA --> HTTP
+    WP --> NMAP
     DNS --> EXT
     TLS --> EXT
     HTTP --> EXT
+    NMAP --> EXT
     SA --> SC
+    NMAP --> SC
     SC --> RR
     RR -->|done/failed, hallazgos e historial| DB
 ```
@@ -80,7 +85,7 @@ flowchart LR
 - `src/database/pool.ts`: pool, prueba de conexión y cierre de MySQL.
 - `src/jobs/`: reclamación de evaluaciones y persistencia de resultados.
 - `src/security/`: validación del objetivo y análisis DNS, TLS y HTTP.
-- `src/services/`: inspectores de red usados por los analizadores.
+- `src/services/`: inspectores de red usados por los analizadores, incluido el ejecutor controlado de Nmap.
 - `src/scoring/`: matriz, cálculo de riesgo, impacto económico y CyberScore.
 
 ### Flujo de datos
@@ -94,6 +99,7 @@ La tabla `evaluaciones` debe contener registros con estado `queued` y relacionar
 - Node.js 20 LTS o superior.
 - npm 10 o superior.
 - MySQL compatible con `mysql2` 3.x, con el esquema de CyberScore disponible.
+- Nmap para ejecución local; la imagen Docker instala Nmap en la etapa de producción.
 - Acceso de red saliente para resolver DNS y consultar por HTTPS los dominios autorizados.
 
 El proyecto está desarrollado y compilado con:
@@ -153,9 +159,10 @@ Después, complete las credenciales y los dominios permitidos en `.env`.
 | `DB_PASSWORD` | Sí | — | Contraseña de MySQL. |
 | `WORKER_POLL_INTERVAL_MS` | No | `5000` | Espera cuando no hay evaluaciones, en milisegundos. |
 | `WORKER_BATCH_SIZE` | No | `1` | Máximo de evaluaciones procesadas por ciclo. |
-| `ALLOWED_DOMAINS` | Condicional | — | Lista de dominios separada por comas. Es obligatoria fuera del modo demo. |
-| `ALLOW_ANY_PUBLIC_DOMAIN` | No | `false` | Permite cualquier dominio público; solo para desarrollo/demo. |
-| `VIRUSTOTAL_API_KEY` | No | — | Reservada para una integración autorizada; no es necesaria para el flujo actual. |
+| `ALLOWED_DOMAINS` | No | — | Lista administrativa opcional de dominios. No reemplaza el activo autorizado en MySQL. |
+| `ALLOW_ANY_PUBLIC_DOMAIN` | No | `false` | Compatibilidad con validación de red; el worker procesa evaluaciones solo si el activo coincide en MySQL y tiene autorización declarada. |
+| `NMAP_SCAN_MODE` | No | `standard` | `standard` examina los 1000 puertos TCP principales; `deep` examina todos los puertos TCP. |
+| `VIRUSTOTAL_API_KEY` | No | — | Clave API v3 opcional para consultar reputación, estadísticas y categorías del dominio. Sin clave válida, la capa se informa como no disponible. |
 
 Ejemplo mínimo:
 
@@ -169,8 +176,10 @@ DB_USER=cyberscore_worker
 DB_PASSWORD=coloque_un_secreto_seguro
 WORKER_POLL_INTERVAL_MS=5000
 WORKER_BATCH_SIZE=1
-ALLOWED_DOMAINS=empresa-ejemplo.com,otro-dominio.com
+ALLOWED_DOMAINS=
 ALLOW_ANY_PUBLIC_DOMAIN=false
+NMAP_SCAN_MODE=standard
+# VIRUSTOTAL_API_KEY=clave_api_v3
 ```
 
 No agregue `.env` al control de versiones ni incluya credenciales reales en documentación, logs o commits.
@@ -209,8 +218,10 @@ El proceso permanece activo mientras consulta la cola. Para detenerlo, envíe `S
 ## Restricciones de uso y seguridad
 
 - Use el worker únicamente sobre dominios propios o con autorización explícita del propietario.
-- `ALLOWED_DOMAINS` debe limitarse al alcance autorizado. No habilite `ALLOW_ANY_PUBLIC_DOMAIN=true` en producción: la configuración lo rechaza.
-- Aunque el modo demo permite cualquier dominio público, no convierte el sistema en una herramienta de pentesting ni autoriza evaluaciones de terceros.
+- El usuario debe declarar expresamente la autorización al registrar el dominio. Para esta entrega no se exige una prueba DNS TXT.
+- El backend y el worker confirman en MySQL que el dominio de la evaluación es el activo autorizado de la misma PyME antes de procesarla.
+- Nmap solo se ejecuta para ese activo registrado y autorizado; una entrada en `ALLOWED_DOMAINS` no concede autorización por sí sola.
+- La validación de red permite únicamente destinos públicos; las redes privadas, loopback, link-local, multicast, reservadas y de documentación siguen bloqueadas.
 - Solo se aceptan nombres de dominio válidos; no se permiten URL completas, rutas, puertos, credenciales embebidas ni espacios.
 - El destino debe resolver a direcciones IP públicas. Se bloquean redes privadas, loopback, link-local, multicast, reservadas y de documentación.
 - El worker no debe exponerse directamente a Internet ni ejecutarse con credenciales MySQL administrativas.
@@ -255,7 +266,7 @@ src/
 ├── jobs/         # Cola, procesamiento y persistencia
 ├── scoring/      # Fórmula, matriz y nivel de riesgo
 ├── security/     # Validación y análisis de seguridad
-├── services/     # Inspectores DNS/HTTP/TLS
+├── services/     # Inspectores DNS/HTTP/TLS y ejecución de Nmap
 └── index.ts      # Punto de entrada del worker
 test/             # Pruebas automatizadas
 .env.example      # Plantilla de configuración

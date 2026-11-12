@@ -7,6 +7,7 @@ describe('WorkerProcessor', () => {
         id: 'evaluation-123',
         pymeId: 'pyme-456',
         domain: 'example.com',
+        domainAuthorized: true,
     };
 
     const analysisResult = {
@@ -108,6 +109,20 @@ describe('WorkerProcessor', () => {
         expect(evaluationRepository.claimNext).toHaveBeenCalledTimes(1);
 
         expect(analyzeEvaluation).toHaveBeenCalledWith(evaluation);
+    });
+
+    it('rechaza la evaluación antes de los análisis si el dominio no está autorizado', async () => {
+        evaluationRepository.claimNext.mockResolvedValue({
+            ...evaluation,
+            domainAuthorized: false,
+        });
+        resultRepository.fail.mockResolvedValue(undefined);
+
+        await processor.processNext();
+
+        expect(analyzeEvaluation).not.toHaveBeenCalled();
+        expect(resultRepository.complete).not.toHaveBeenCalled();
+        expect(resultRepository.fail).toHaveBeenCalledWith(evaluation.id);
     });
 
     it('guarda el resultado obtenido durante el análisis', async () => {

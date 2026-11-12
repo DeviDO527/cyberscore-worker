@@ -1,4 +1,11 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import {
+    afterEach,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    jest,
+} from '@jest/globals';
 
 import { TlsAnalyzer } from '../src/security/tls-analyzer';
 
@@ -19,6 +26,10 @@ describe('TlsAnalyzer', () => {
         analyzer = new TlsAnalyzer(tlsMock);
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     it('consulta la información TLS del dominio', async () => {
         tlsMock.inspect.mockResolvedValue({
             authorized: true,
@@ -34,12 +45,17 @@ describe('TlsAnalyzer', () => {
         expect(tlsMock.inspect).toHaveBeenCalledWith('example.com');
     });
 
-    it('devuelve la información del certificado', async () => {
+    it('devuelve la información del certificado incluyendo los días restantes', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(
+            new Date('2026-01-01T00:00:00.000Z'),
+        );
+
         tlsMock.inspect.mockResolvedValue({
             authorized: true,
             protocol: 'TLSv1.3',
             validFrom: 'Jan 01 00:00:00 2026 GMT',
-            validTo: 'Jan 01 00:00:00 2027 GMT',
+            validTo: 'Jan 31 00:00:00 2026 GMT',
             subject: { CN: 'example.com' },
             issuer: { CN: 'Example CA' },
         });
@@ -52,12 +68,48 @@ describe('TlsAnalyzer', () => {
             protocol: 'TLSv1.3',
             certificate: {
                 validFrom: 'Jan 01 00:00:00 2026 GMT',
-                validTo: 'Jan 01 00:00:00 2027 GMT',
+                validTo: 'Jan 31 00:00:00 2026 GMT',
+                daysRemaining: 30,
                 subject: { CN: 'example.com' },
                 issuer: { CN: 'Example CA' },
             },
             findings: [],
         });
+    });
+
+    it('calcula un valor negativo cuando el certificado ya venció', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(
+            new Date('2026-02-01T00:00:00.000Z'),
+        );
+
+        tlsMock.inspect.mockResolvedValue({
+            authorized: true,
+            protocol: 'TLSv1.3',
+            validFrom: 'Jan 01 00:00:00 2025 GMT',
+            validTo: 'Jan 22 00:00:00 2026 GMT',
+            subject: { CN: 'example.com' },
+            issuer: { CN: 'Example CA' },
+        });
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.certificate.daysRemaining).toBe(-10);
+    });
+
+    it('devuelve null cuando la fecha de vencimiento no es válida', async () => {
+        tlsMock.inspect.mockResolvedValue({
+            authorized: true,
+            protocol: 'TLSv1.3',
+            validFrom: 'Jan 01 00:00:00 2026 GMT',
+            validTo: 'fecha inválida',
+            subject: { CN: 'example.com' },
+            issuer: { CN: 'Example CA' },
+        });
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.certificate.daysRemaining).toBeNull();
     });
 
     it('genera un hallazgo cuando el certificado no está autorizado', async () => {

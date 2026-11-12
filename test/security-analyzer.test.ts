@@ -1,319 +1,470 @@
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import {
+    describe,
+    expect,
+    it,
+    jest,
+} from '@jest/globals';
 
-import { SecurityAnalyzer } from '../src/security/security-analyzer';
+import {
+    DnsAnalysisResult,
+} from '../src/security/dns-analyzer';
+
+import {
+    HeadersAnalysisResult,
+} from '../src/security/headers-analyzer';
+
+import {
+    SecurityAnalyzer,
+} from '../src/security/security-analyzer';
+
+import {
+    TlsAnalysisResult,
+} from '../src/security/tls-analyzer';
 
 describe('SecurityAnalyzer', () => {
-    const domain = 'example.com';
-
-    const dnsResult = {
-        status: 'completed',
-        findings: [],
-        records: {
-            a: ['203.0.113.10'],
-            aaaa: ['2001:db8::10'],
-            mx: [
-                { exchange: 'mail.example.com', priority: 10 },
-            ],
-            ns: ['ns1.example.com'],
-        },
+    type AnalyzerMock<T> = {
+        analyze: jest.Mock<
+            (domain: string) => Promise<T>
+        >;
     };
 
-    const tlsResult = {
-        status: 'completed',
-        authorized: true,
-        protocol: 'TLSv1.3',
-        certificate: {
-            validFrom: 'Jan 01 00:00:00 2026 GMT',
-            validTo: 'Jan 01 00:00:00 2027 GMT',
-            subject: { CN: 'example.com' },
-            issuer: { CN: 'Example CA' },
-        },
-        findings: [],
-    };
+    function createDnsRecords() {
+        return {
+            a: [],
+            aaaa: [],
+            mx: [],
+            ns: [],
+        };
+    }
 
-    const headersResult = {
-        status: 'completed',
-        statusCode: 200,
-        headers: {
-            'strict-transport-security': 'max-age=31536000',
-        },
-        findings: [
-            {
-                title: 'Cabecera de seguridad ausente',
-                severity: 'medium',
-                description: 'No se encontró una cabecera de seguridad esperada.',
-            },
-        ],
-    };
-
-    let dnsAnalyzer: {
-        analyze: ReturnType<typeof jest.fn>;
-    };
-
-    let tlsAnalyzer: {
-        analyze: ReturnType<typeof jest.fn>;
-    };
-
-    let headersAnalyzer: {
-        analyze: ReturnType<typeof jest.fn>;
-    };
-
-    let analyzer: SecurityAnalyzer;
-
-    beforeEach(() => {
-        jest.clearAllMocks();
-
-        dnsAnalyzer = {
-            analyze: jest.fn(),
+    function createAnalyzer() {
+        const dnsAnalyzer: AnalyzerMock<DnsAnalysisResult> = {
+            analyze: jest.fn<
+                (domain: string) =>
+                    Promise<DnsAnalysisResult>
+            >(),
         };
 
-        tlsAnalyzer = {
-            analyze: jest.fn(),
+        const tlsAnalyzer: AnalyzerMock<TlsAnalysisResult> = {
+            analyze: jest.fn<
+                (domain: string) =>
+                    Promise<TlsAnalysisResult>
+            >(),
         };
 
-        headersAnalyzer = {
-            analyze: jest.fn(),
-        };
+        const headersAnalyzer:
+            AnalyzerMock<HeadersAnalysisResult> = {
+                analyze: jest.fn<
+                    (domain: string) =>
+                        Promise<HeadersAnalysisResult>
+                >(),
+            };
 
-        analyzer = new SecurityAnalyzer({
+        const analyzer = new SecurityAnalyzer({
             dnsAnalyzer,
             tlsAnalyzer,
             headersAnalyzer,
         });
-    });
 
-    it('ejecuta los analizadores configurados para el dominio', async () => {
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
+        return {
+            analyzer,
+            dnsAnalyzer,
+            tlsAnalyzer,
+            headersAnalyzer,
+        };
+    }
 
-        await analyzer.analyze(domain);
-
-        expect(dnsAnalyzer.analyze).toHaveBeenCalledWith(domain);
-        expect(tlsAnalyzer.analyze).toHaveBeenCalledWith(domain);
-        expect(headersAnalyzer.analyze).toHaveBeenCalledWith(domain);
-    });
-
-    it('devuelve los hallazgos recopilados de las capas analizadas', async () => {
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
-
-        const result = await analyzer.analyze(domain);
-
-        expect(result.findings).toHaveLength(1);
-
-        expect(result.findings).toEqual([
-            expect.objectContaining({
-                title: 'Cabecera de seguridad ausente',
-                severity: 'medium',
-            }),
-        ]);
-    });
-
-    it('resume el estado y el número de hallazgos por capa', async () => {
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
-
-        const result = await analyzer.analyze(domain);
-
-        expect(result.layersSummary).toEqual({
-            dns: {
-                status: 'completed',
-                findings: 0,
-            },
-            tls: {
-                status: 'completed',
-                findings: 0,
-            },
-            headers: {
-                status: 'completed',
-                findings: 1,
-            },
-        });
-    });
-
-    it('rechaza un dominio vacío sin ejecutar los analizadores', async () => {
-        await expect(analyzer.analyze('')).rejects.toThrow();
-
-        expect(dnsAnalyzer.analyze).not.toHaveBeenCalled();
-        expect(tlsAnalyzer.analyze).not.toHaveBeenCalled();
-        expect(headersAnalyzer.analyze).not.toHaveBeenCalled();
-    });
-
-    it('rechaza una entrada que no sea un dominio válido', async () => {
-        await expect(
-            analyzer.analyze('esto no es un dominio'),
-        ).rejects.toThrow();
-
-        expect(dnsAnalyzer.analyze).not.toHaveBeenCalled();
-        expect(tlsAnalyzer.analyze).not.toHaveBeenCalled();
-        expect(headersAnalyzer.analyze).not.toHaveBeenCalled();
-    });
-
-    it('propaga el error si una capa falla', async () => {
-        const error = new Error('Fallo durante la comprobación TLS');
-
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockRejectedValue(error);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
-
-        await expect(analyzer.analyze(domain)).rejects.toThrow(
-            'Fallo durante la comprobación TLS',
-        );
-    });
-
-    it('devuelve un resultado vacío cuando las capas terminan sin hallazgos', async () => {
+    function configureSuccessfulAnalysis(
+        dnsAnalyzer: AnalyzerMock<DnsAnalysisResult>,
+        tlsAnalyzer: AnalyzerMock<TlsAnalysisResult>,
+        headersAnalyzer:
+            AnalyzerMock<HeadersAnalysisResult>,
+    ): void {
         dnsAnalyzer.analyze.mockResolvedValue({
             status: 'completed',
             findings: [],
-            records: {
-                a: [],
-                aaaa: [],
-                mx: [],
-                ns: [],
-            },
+            records: createDnsRecords(),
         });
-    
+
         tlsAnalyzer.analyze.mockResolvedValue({
             status: 'completed',
+            authorized: true,
+            protocol: 'TLSv1.3',
+            certificate: {
+                validFrom:
+                    'Jan 01 00:00:00 2026 GMT',
+                validTo:
+                    'Jan 01 00:00:00 2027 GMT',
+                daysRemaining: 55,
+                subject: {
+                    CN: 'example.com',
+                },
+                issuer: {
+                    CN: 'Example CA',
+                },
+            },
             findings: [],
         });
-    
+
         headersAnalyzer.analyze.mockResolvedValue({
             status: 'completed',
             statusCode: 200,
-            headers: {},
-            findings: [],
-        });
-    
-        const result = await analyzer.analyze('example.com');
-    
-        expect(result.findings).toEqual([]);
-    
-        expect(result.layersSummary).toEqual({
-            dns: {
-                status: 'completed',
-                findings: 0,
-            },
-            tls: {
-                status: 'completed',
-                findings: 0,
-            },
             headers: {
-                status: 'completed',
-                findings: 0,
+                'content-security-policy':
+                    "default-src 'self'",
             },
-        });
-    });
-
-    it('conserva los registros DNS en el resultado consolidado', async () => {
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
-
-        const result = await analyzer.analyze(domain);
-
-        expect(result.dnsRecords).toEqual(dnsResult.records);
-    });
-
-    it('asigna la capa y conserva evidencia de los hallazgos HTTP', async () => {
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-        headersAnalyzer.analyze.mockResolvedValue(headersResult);
-
-        const result = await analyzer.analyze(domain);
-
-        expect(result.findings).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    layer: 'headers',
-                    title: 'Cabecera de seguridad ausente',
-                    severity: 'medium',
-                    evidence: JSON.stringify({
-                        statusCode: 200,
-                        headers: headersResult.headers,
-                    }),
-                }),
-            ]),
-        );
-    });
-
-    it('asigna la capa y conserva evidencia de los hallazgos TLS', async () => {
-        const tlsFailure = {
-            ...tlsResult,
-            authorized: false,
-            protocol: 'TLSv1.2',
-            findings: [
-                {
-                    title: 'Certificado TLS no autorizado',
-                    severity: 'high',
-                    description: 'No se pudo validar el certificado.',
-                },
+            url: 'https://example.com/',
+            usesHttps: true,
+            server: 'nginx',
+            presentHeaders: [
+                'Content-Security-Policy',
             ],
-        };
-
-        dnsAnalyzer.analyze.mockResolvedValue(dnsResult);
-        tlsAnalyzer.analyze.mockResolvedValue(tlsFailure);
-        headersAnalyzer.analyze.mockResolvedValue({
-            ...headersResult,
+            missingHeaders: [
+                'X-Frame-Options',
+            ],
             findings: [],
         });
+    }
 
-        const result = await analyzer.analyze(domain);
+    it(
+        'ejecuta todos los analizadores para el dominio',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
 
-        expect(result.findings).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    layer: 'tls',
-                    title: 'Certificado TLS no autorizado',
-                    severity: 'high',
-                    evidence: JSON.stringify({
-                        authorized: false,
-                        protocol: 'TLSv1.2',
-                        certificate: tlsResult.certificate,
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            await analyzer.analyze('example.com');
+
+            expect(
+                dnsAnalyzer.analyze,
+            ).toHaveBeenCalledWith('example.com');
+
+            expect(
+                tlsAnalyzer.analyze,
+            ).toHaveBeenCalledWith('example.com');
+
+            expect(
+                headersAnalyzer.analyze,
+            ).toHaveBeenCalledWith('example.com');
+        },
+    );
+
+    it(
+        'consolida la información completa de las capas',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            const result =
+                await analyzer.analyze('example.com');
+
+            expect(result.layersSummary).toEqual({
+                dns: {
+                    status: 'completed',
+                    findings: 0,
+                },
+                tls: {
+                    status: 'completed',
+                    findings: 0,
+                    authorized: true,
+                    protocol: 'TLSv1.3',
+                    certificate: {
+                        validFrom:
+                            'Jan 01 00:00:00 2026 GMT',
+                        validTo:
+                            'Jan 01 00:00:00 2027 GMT',
+                        daysRemaining: 55,
+                        subject: {
+                            CN: 'example.com',
+                        },
+                        issuer: {
+                            CN: 'Example CA',
+                        },
+                    },
+                },
+                headers: {
+                    status: 'completed',
+                    findings: 0,
+                    statusCode: 200,
+                    url: 'https://example.com/',
+                    usesHttps: true,
+                    server: 'nginx',
+                    presentHeaders: [
+                        'Content-Security-Policy',
+                    ],
+                    missingHeaders: [
+                        'X-Frame-Options',
+                    ],
+                },
+            });
+        },
+    );
+
+    it(
+        'conserva los registros DNS en el resultado',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            const result =
+                await analyzer.analyze('example.com');
+
+            expect(result.dnsRecords).toEqual(
+                createDnsRecords(),
+            );
+        },
+    );
+
+    it(
+        'consolida los hallazgos y su evidencia',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            dnsAnalyzer.analyze.mockResolvedValue({
+                status: 'completed',
+                findings: [
+                    {
+                        title: 'Problema DNS',
+                        severity: 'medium',
+                        description:
+                            'El dominio presenta un problema DNS.',
+                    },
+                ],
+                records: createDnsRecords(),
+            });
+
+            tlsAnalyzer.analyze.mockResolvedValue({
+                status: 'completed',
+                authorized: false,
+                protocol: 'TLSv1.2',
+                certificate: {
+                    validFrom:
+                        'Jan 01 00:00:00 2026 GMT',
+                    validTo:
+                        'Jan 01 00:00:00 2027 GMT',
+                    daysRemaining: 55,
+                    subject: {
+                        CN: 'example.com',
+                    },
+                    issuer: {
+                        CN: 'Unknown CA',
+                    },
+                },
+                findings: [
+                    {
+                        title:
+                            'Certificado TLS no autorizado',
+                        severity: 'high',
+                        description:
+                            'No fue posible validar el certificado.',
+                    },
+                ],
+            });
+
+            headersAnalyzer.analyze.mockResolvedValue({
+                status: 'completed',
+                statusCode: 200,
+                headers: {},
+                url: 'https://example.com/',
+                usesHttps: true,
+                server: null,
+                presentHeaders: [],
+                missingHeaders: [
+                    'Content-Security-Policy',
+                ],
+                findings: [
+                    {
+                        title:
+                            'Cabecera de seguridad ausente',
+                        severity: 'medium',
+                        description:
+                            'No se encontró Content-Security-Policy.',
+                    },
+                ],
+            });
+
+            const result =
+                await analyzer.analyze('example.com');
+
+            expect(result.findings).toHaveLength(3);
+
+            expect(result.findings).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        layer: 'dns',
+                        title: 'Problema DNS',
                     }),
-                }),
-            ]),
-        );
+                    expect.objectContaining({
+                        layer: 'tls',
+                        title:
+                            'Certificado TLS no autorizado',
+                    }),
+                    expect.objectContaining({
+                        layer: 'headers',
+                        title:
+                            'Cabecera de seguridad ausente',
+                    }),
+                ]),
+            );
+
+            const tlsFinding = result.findings.find(
+                finding => finding.layer === 'tls',
+            );
+
+            expect(tlsFinding?.evidence).toContain(
+                '"daysRemaining":55',
+            );
+        },
+    );
+
+    it(
+        'conserva la información TLS aunque no existan hallazgos',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            const result =
+                await analyzer.analyze('example.com');
+
+            expect(
+                result.layersSummary.tls.certificate.issuer,
+            ).toEqual({
+                CN: 'Example CA',
+            });
+
+            expect(
+                result.layersSummary.tls.certificate
+                    .daysRemaining,
+            ).toBe(55);
+        },
+    );
+
+    it(
+        'conserva la información HTTP aunque no existan hallazgos',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            const result =
+                await analyzer.analyze('example.com');
+
+            expect(
+                result.layersSummary.headers.statusCode,
+            ).toBe(200);
+
+            expect(
+                result.layersSummary.headers.server,
+            ).toBe('nginx');
+
+            expect(
+                result.layersSummary.headers.presentHeaders,
+            ).toEqual([
+                'Content-Security-Policy',
+            ]);
+        },
+    );
+
+    it(
+        'propaga un error cuando uno de los analizadores falla',
+        async () => {
+            const {
+                analyzer,
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            } = createAnalyzer();
+
+            configureSuccessfulAnalysis(
+                dnsAnalyzer,
+                tlsAnalyzer,
+                headersAnalyzer,
+            );
+
+            tlsAnalyzer.analyze.mockRejectedValue(
+                new Error(
+                    'No fue posible analizar TLS',
+                ),
+            );
+
+            await expect(
+                analyzer.analyze('example.com'),
+            ).rejects.toThrow(
+                'No fue posible analizar TLS',
+            );
+        },
+    );
+
+    it('rechaza dominios vacíos antes de iniciar análisis', async () => {
+        const { analyzer, dnsAnalyzer, tlsAnalyzer, headersAnalyzer } = createAnalyzer();
+
+        await expect(analyzer.analyze('   ')).rejects.toThrow('El dominio es obligatorio');
+        expect(dnsAnalyzer.analyze).not.toHaveBeenCalled();
+        expect(tlsAnalyzer.analyze).not.toHaveBeenCalled();
+        expect(headersAnalyzer.analyze).not.toHaveBeenCalled();
     });
 
-    it('asigna la capa y conserva evidencia de los hallazgos DNS', async () => {
+    it('rechaza dominios con formato inválido antes de iniciar análisis', async () => {
+        const { analyzer, dnsAnalyzer, tlsAnalyzer, headersAnalyzer } = createAnalyzer();
 
-        const dnsFinding = {
-            title: 'Configuración DNS detectada',
-            severity: 'medium',
-            description: 'Se detectó una configuración DNS que requiere revisión.',
-        };
-    
-        dnsAnalyzer.analyze.mockResolvedValue({
-            ...dnsResult,
-            findings: [dnsFinding],
-        });
-    
-        tlsAnalyzer.analyze.mockResolvedValue(tlsResult);
-    
-        headersAnalyzer.analyze.mockResolvedValue({
-            ...headersResult,
-            findings: [],
-        });
-    
-        const result = await analyzer.analyze(domain);
-    
-        expect(result.findings).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    layer: 'dns',
-                    title: 'Configuración DNS detectada',
-                    severity: 'medium',
-                    description: 'Se detectó una configuración DNS que requiere revisión.',
-                    evidence: JSON.stringify({
-                        records: dnsResult.records,
-                    }),
-                }),
-            ]),
+        await expect(analyzer.analyze('https://example.com')).rejects.toThrow(
+            'El dominio no tiene un formato válido',
         );
+        expect(dnsAnalyzer.analyze).not.toHaveBeenCalled();
+        expect(tlsAnalyzer.analyze).not.toHaveBeenCalled();
+        expect(headersAnalyzer.analyze).not.toHaveBeenCalled();
     });
-
 });

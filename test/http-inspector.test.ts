@@ -27,6 +27,17 @@ describe('HttpInspector', () => {
         addresses: ['93.184.216.34'],
     };
 
+    const response: HttpInspection = {
+        statusCode: 200,
+        headers: {
+            'content-type': 'text/html',
+            'x-content-type-options': 'nosniff',
+        },
+        url: 'https://example.com/',
+        usesHttps: true,
+        server: 'nginx',
+    };
+
     beforeEach(() => {
         jest.clearAllMocks();
 
@@ -47,29 +58,15 @@ describe('HttpInspector', () => {
         inspector = new HttpInspector(validatorMock, httpMock);
     });
 
-    it('consulta las cabeceras HTTP del dominio', async () => {
-        httpMock.inspect.mockResolvedValue({
-            statusCode: 200,
-            headers: {
-                'content-type': 'text/html',
-                'strict-transport-security': 'max-age=31536000',
-            },
-        });
+    it('consulta la información HTTP del dominio', async () => {
+        httpMock.inspect.mockResolvedValue(response);
 
         await inspector.inspect('example.com');
 
         expect(httpMock.inspect).toHaveBeenCalledWith(validatedTarget);
     });
 
-    it('devuelve el código HTTP y las cabeceras recibidas', async () => {
-        const response: HttpInspection = {
-            statusCode: 200,
-            headers: {
-                'content-type': 'text/html',
-                'x-content-type-options': 'nosniff',
-            },
-        };
-
+    it('devuelve la información enriquecida recibida', async () => {
         httpMock.inspect.mockResolvedValue(response);
 
         const result = await inspector.inspect('example.com');
@@ -107,25 +104,19 @@ describe('HttpInspector', () => {
 
     it('conserva una respuesta HTTP aunque el servidor devuelva un error', async () => {
         httpMock.inspect.mockResolvedValue({
+            ...response,
             statusCode: 503,
-            headers: {
-                'content-type': 'text/html',
-            },
         });
 
         const result = await inspector.inspect('example.com');
 
         expect(result.statusCode).toBe(503);
-        expect(result.headers).toEqual({
-            'content-type': 'text/html',
-        });
+        expect(result.headers).toEqual(response.headers);
+        expect(result.server).toBe('nginx');
     });
 
     it('mantiene el hostname normalizado al consultar el inspector', async () => {
-        httpMock.inspect.mockResolvedValue({
-            statusCode: 200,
-            headers: {},
-        });
+        httpMock.inspect.mockResolvedValue(response);
 
         await inspector.inspect('  EXAMPLE.COM  ');
 
@@ -143,6 +134,8 @@ describe('HttpInspector', () => {
     });
 
     it('valida el dominio antes de realizar la conexión HTTP', async () => {
+        httpMock.inspect.mockResolvedValue(response);
+
         await inspector.inspect('example.com');
 
         expect(validatorMock.validate).toHaveBeenCalledWith('example.com');

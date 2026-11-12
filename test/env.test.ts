@@ -15,6 +15,7 @@ describe('WorkerConfig', () => {
             DB_PASSWORD: 'test',
             ALLOWED_DOMAINS: 'example.com, test.example.com',
             ALLOW_ANY_PUBLIC_DOMAIN: 'false',
+            NMAP_SCAN_MODE: 'standard',
         });
     });
 
@@ -35,6 +36,38 @@ describe('WorkerConfig', () => {
             'example.com',
             'test.example.com',
         ]);
+    });
+
+    it('utiliza standard para Nmap cuando no se configura una modalidad', () => {
+        delete process.env.NMAP_SCAN_MODE;
+
+        const config = loadConfig();
+
+        expect(config.nmap.scanMode).toBe('standard');
+    });
+
+    it('permite configurar el modo deep para Nmap', () => {
+        process.env.NMAP_SCAN_MODE = 'deep';
+
+        const config = loadConfig();
+
+        expect(config.nmap.scanMode).toBe('deep');
+    });
+
+    it('normaliza mayúsculas y espacios en la modalidad Nmap', () => {
+        process.env.NMAP_SCAN_MODE = '  DEEP  ';
+
+        const config = loadConfig();
+
+        expect(config.nmap.scanMode).toBe('deep');
+    });
+
+    it('rechaza una modalidad Nmap no soportada', () => {
+        process.env.NMAP_SCAN_MODE = 'full';
+
+        expect(() => loadConfig()).toThrow(
+            'NMAP_SCAN_MODE debe ser standard o deep.',
+        );
     });
 
     it('desactiva el modo demostración por defecto', () => {
@@ -70,10 +103,10 @@ describe('WorkerConfig', () => {
         expect(() => loadConfig()).toThrow();
     });
 
-    it('exige dominios autorizados en modo controlado', () => {
+    it('permite que la autorización de dominios se administre desde la base de datos', () => {
         delete process.env.ALLOWED_DOMAINS;
 
-        expect(() => loadConfig()).toThrow();
+        expect(loadConfig().allowedDomains).toEqual([]);
     });
 
     it('elimina entradas vacías y espacios de la lista de dominios', () => {
@@ -194,12 +227,10 @@ describe('WorkerConfig', () => {
         );
     });
 
-    it('rechaza una lista de dominios que queda vacía después de eliminar espacios', () => {
+    it('permite una lista administrativa vacía después de eliminar espacios', () => {
         process.env.ALLOWED_DOMAINS = ' , , ';
 
-        expect(() => loadConfig()).toThrow(
-            'Debe configurarse al menos un dominio autorizado.',
-        );
+        expect(loadConfig().allowedDomains).toEqual([]);
     });
 
     it('normaliza y elimina dominios duplicados', () => {

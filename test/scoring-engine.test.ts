@@ -348,7 +348,7 @@ describe('ScoringEngine - CyberScore Formula v1.0', () => {
     it('debe incluir la versión de la fórmula en el resultado', () => {
       const result = calculateCyberScore([0.2, 0.4]);
     
-      expect(result.formulaVersion).toBe('1.0');
+      expect(result.formulaVersion).toBe('1.1');
     });
 
   });

@@ -107,4 +107,18 @@ describe('DnsAnalyzer', () => {
             analyzer.analyze('example.com'),
         ).rejects.toThrow('Error de resolución DNS');
     });
+
+    it('trata ENODATA como una consulta sin registros', async () => {
+        dnsMock.resolve4.mockRejectedValue(
+            Object.assign(new Error('No hay registros A'), { code: 'ENODATA' }),
+        );
+        dnsMock.resolve6.mockResolvedValue([]);
+        dnsMock.resolveMx.mockResolvedValue([]);
+        dnsMock.resolveNs.mockResolvedValue([]);
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.records.a).toEqual([]);
+        expect(result.status).toBe('completed');
+    });
 });

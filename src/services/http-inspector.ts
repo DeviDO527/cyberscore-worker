@@ -2,9 +2,14 @@ import https from 'node:https';
 
 import { ValidatedTarget } from '../security/network-target-validator';
 
+type HeaderValue = string | string[] | undefined;
+
 export interface HttpInspection {
     statusCode: number;
-    headers: Record<string, string | string[] | undefined>;
+    headers: Record<string, HeaderValue>;
+    url: string;
+    usesHttps: boolean;
+    server: string | null;
 }
 
 export interface HttpInspectionDependency {
@@ -43,7 +48,6 @@ export class HttpInspector {
             throw new Error('El dominio no tiene un formato válido.');
         }
 
-        // Primero se valida la autorización y las direcciones IP.
         const target = await this.validator.validate(normalizedDomain);
 
         if (
@@ -54,7 +58,6 @@ export class HttpInspector {
             throw new Error('El dominio no tiene direcciones IP validadas.');
         }
 
-        // La conexión utiliza exclusivamente el destino validado.
         return this.inspector.inspect(target);
     }
 }
@@ -74,7 +77,7 @@ class NodeHttpInspector implements HttpInspectionDependency {
                     port: 443,
                     servername: target.hostname,
                     path: '/',
-                    method: 'HEAD',
+                    method: 'GET',
                     timeout: 10_000,
                     headers: {
                         Host: target.hostname,
@@ -82,9 +85,17 @@ class NodeHttpInspector implements HttpInspectionDependency {
                     },
                 },
                 (response) => {
+                    const serverHeader = response.headers.server;
+                    const server = Array.isArray(serverHeader)
+                        ? (serverHeader[0] ?? null)
+                        : (serverHeader ?? null);
+
                     const result: HttpInspection = {
                         statusCode: response.statusCode ?? 0,
                         headers: response.headers,
+                        url: `https://${target.hostname}/`,
+                        usesHttps: true,
+                        server,
                     };
 
                     response.resume();

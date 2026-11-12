@@ -32,11 +32,8 @@ type FakeRequest = EventEmitter & {
 };
 
 describe('NodeHttpInspector', () => {
-
     let inspector: HttpInspector;
-
     let fakeRequest: FakeRequest;
-
     let requestOptions: RequestOptions | undefined;
 
     let responseHandler:
@@ -59,9 +56,7 @@ describe('NodeHttpInspector', () => {
         requestOptions = undefined;
         responseHandler = undefined;
 
-        validatorMock.validate.mockResolvedValue(
-            validatedTarget,
-        );
+        validatorMock.validate.mockResolvedValue(validatedTarget);
 
         inspector = new HttpInspector(validatorMock);
 
@@ -82,7 +77,7 @@ describe('NodeHttpInspector', () => {
             destroy,
         });
 
-        jest.spyOn(https, 'request').mockImplementation(((
+        const requestMock = ((
             options: RequestOptions,
             callback?: (response: IncomingMessage) => void,
         ) => {
@@ -90,25 +85,18 @@ describe('NodeHttpInspector', () => {
             responseHandler = callback;
 
             return fakeRequest as unknown as ClientRequest;
+        }) as unknown as typeof https.request;
 
-        }) as unknown as typeof https.request);
+        jest.spyOn(https, 'request').mockImplementation(requestMock);
     });
 
     afterEach(() => {
         jest.restoreAllMocks();
     });
 
-    /**
-     * Inicia la inspección y espera a que termine
-     * la validación asíncrona del dominio.
-     *
-     * No esperamos la respuesta HTTP: únicamente
-     * necesitamos que se registre la petición.
-     */
     async function startInspection(): Promise<{
         promise: Promise<HttpInspection>;
     }> {
-
         const promise = inspector.inspect('example.com');
 
         await Promise.resolve();
@@ -120,9 +108,8 @@ describe('NodeHttpInspector', () => {
 
     function simulateResponse(
         statusCode?: number,
-        headers: Record<string, string> = {},
+        headers: Record<string, string | string[]> = {},
     ): void {
-
         const response = {
             statusCode,
             headers,
@@ -130,24 +117,18 @@ describe('NodeHttpInspector', () => {
         } as unknown as IncomingMessage;
 
         if (!responseHandler) {
-            throw new Error(
-                'No se registró el callback HTTP.',
-            );
+            throw new Error('No se registró el callback HTTP.');
         }
 
         responseHandler(response);
     }
 
-    // =================================================
-    // RESPUESTAS HTTP
-    // =================================================
-
-    it('realiza la petición HTTPS utilizando la IP validada', async () => {
-
+    it('realiza una petición HTTPS GET utilizando la IP validada', async () => {
         const { promise } = await startInspection();
 
         simulateResponse(200, {
             'content-type': 'text/html',
+            server: 'nginx',
         });
 
         const result = await promise;
@@ -157,7 +138,7 @@ describe('NodeHttpInspector', () => {
             port: 443,
             servername: 'example.com',
             path: '/',
-            method: 'HEAD',
+            method: 'GET',
             timeout: 10_000,
             headers: {
                 Host: 'example.com',
@@ -165,17 +146,21 @@ describe('NodeHttpInspector', () => {
             },
         });
 
-        expect(result.statusCode).toBe(200);
-
-        expect(result.headers).toEqual({
-            'content-type': 'text/html',
+        expect(result).toEqual({
+            statusCode: 200,
+            headers: {
+                'content-type': 'text/html',
+                server: 'nginx',
+            },
+            url: 'https://example.com/',
+            usesHttps: true,
+            server: 'nginx',
         });
 
         expect(fakeRequest.end).toHaveBeenCalledTimes(1);
     });
 
     it('utiliza 0 cuando la respuesta no contiene código HTTP', async () => {
-
         const { promise } = await startInspection();
 
         simulateResponse(undefined, {});
@@ -186,7 +171,6 @@ describe('NodeHttpInspector', () => {
     });
 
     it('conserva las cabeceras recibidas del servidor', async () => {
-
         const headers = {
             'content-type': 'text/html',
             'strict-transport-security': 'max-age=31536000',
@@ -202,12 +186,41 @@ describe('NodeHttpInspector', () => {
         expect(result.headers).toEqual(headers);
     });
 
-    // =================================================
-    // ERRORES Y TIMEOUT
-    // =================================================
+    it('detecta el servidor a partir de la cabecera Server', async () => {
+        const { promise } = await startInspection();
+
+        simulateResponse(200, {
+            server: 'cloudflare',
+        });
+
+        const result = await promise;
+
+        expect(result.server).toBe('cloudflare');
+    });
+
+    it('usa el primer valor cuando la cabecera Server contiene un arreglo', async () => {
+        const { promise } = await startInspection();
+
+        simulateResponse(200, {
+            server: ['nginx', 'ignored'],
+        });
+
+        const result = await promise;
+
+        expect(result.server).toBe('nginx');
+    });
+
+    it('devuelve null cuando el servidor no expone la cabecera Server', async () => {
+        const { promise } = await startInspection();
+
+        simulateResponse(200, {});
+
+        const result = await promise;
+
+        expect(result.server).toBeNull();
+    });
 
     it('rechaza la petición cuando se agota el tiempo de espera', async () => {
-
         const { promise } = await startInspection();
 
         fakeRequest.emit('timeout');
@@ -222,7 +235,6 @@ describe('NodeHttpInspector', () => {
     });
 
     it('propaga los errores de conexión HTTP', async () => {
-
         const { promise } = await startInspection();
 
         fakeRequest.emit(
@@ -235,12 +247,7 @@ describe('NodeHttpInspector', () => {
         );
     });
 
-    // =================================================
-    // VALIDACIÓN DEL DESTINO
-    // =================================================
-
     it('rechaza una dirección IP vacía', async () => {
-
         validatorMock.validate.mockResolvedValue({
             hostname: 'example.com',
             addresses: [''],
@@ -253,5 +260,13 @@ describe('NodeHttpInspector', () => {
         );
 
         expect(https.request).not.toHaveBeenCalled();
+    });
+
+    it('devuelve null si la cabecera Server es una lista vacía', async () => {
+        const { promise } = await startInspection();
+
+        simulateResponse(200, { server: [] });
+
+        await expect(promise).resolves.toMatchObject({ server: null });
     });
 });

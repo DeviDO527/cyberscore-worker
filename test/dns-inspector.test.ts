@@ -106,4 +106,17 @@ describe('DnsInspector', () => {
             inspector.inspect('example.com'),
         ).rejects.toThrow('Fallo de resolución DNS');
     });
+
+    it('devuelve una lista vacía cuando el resolver informa ENODATA', async () => {
+        resolverMock.resolve4.mockRejectedValue(
+            Object.assign(new Error('No hay registros A'), { code: 'ENODATA' }),
+        );
+        resolverMock.resolve6.mockResolvedValue([]);
+        resolverMock.resolveMx.mockResolvedValue([]);
+        resolverMock.resolveNs.mockResolvedValue([]);
+
+        const result = await inspector.inspect('example.com');
+
+        expect(result.a).toEqual([]);
+    });
 });

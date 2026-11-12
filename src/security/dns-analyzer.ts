@@ -29,6 +29,32 @@ export class DnsAnalyzer {
         private readonly resolver: DnsResolver,
     ) {}
 
+    private async resolveSafely<T>(
+    resolve: () => Promise<T>,
+    fallback: T,
+    ): Promise<T> {
+        try {
+            return await resolve();
+        } catch (error: unknown) {
+            const code =
+                typeof error === 'object' &&
+                error !== null &&
+                'code' in error
+                    ? (error as { code?: string }).code
+                    : undefined;
+
+            if (
+                code === 'ENODATA' ||
+                code === 'ENOTFOUND' ||
+                code === 'ENODOMAIN'
+            ) {
+                return fallback;
+            }
+
+            throw error;
+        }
+    }
+
     async analyze(domain: string): Promise<DnsAnalysisResult> {
         if (
             typeof domain !== 'string' ||
@@ -51,10 +77,22 @@ export class DnsAnalyzer {
         }
 
         const [a, aaaa, mx, ns] = await Promise.all([
-            this.resolver.resolve4(normalizedDomain),
-            this.resolver.resolve6(normalizedDomain),
-            this.resolver.resolveMx(normalizedDomain),
-            this.resolver.resolveNs(normalizedDomain),
+            this.resolveSafely(
+                () => this.resolver.resolve4(normalizedDomain),
+                [],
+            ),
+            this.resolveSafely(
+                () => this.resolver.resolve6(normalizedDomain),
+                [],
+            ),
+            this.resolveSafely(
+                () => this.resolver.resolveMx(normalizedDomain),
+                [],
+            ),
+            this.resolveSafely(
+                () => this.resolver.resolveNs(normalizedDomain),
+                [],
+            ),
         ]);
 
         return {

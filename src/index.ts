@@ -1,3 +1,4 @@
+
 import pino from 'pino';
 
 import { loadConfig } from './config/env';
@@ -18,10 +19,15 @@ import { DnsAnalyzer } from './security/dns-analyzer';
 import { TlsAnalyzer } from './security/tls-analyzer';
 import { HeadersAnalyzer } from './security/headers-analyzer';
 import { SecurityAnalyzer } from './security/security-analyzer';
+import { WhoisAnalyzer } from './security/whois-analyzer';
+import { VirusTotalAnalyzer } from './security/virustotal-analyzer';
+import { NmapAnalyzer } from './security/nmap-analyzer';
 
 import { Resolver } from 'node:dns/promises';
 import { HttpInspector } from './services/http-inspector';
 import { TlsInspector } from './services/tls-inspector';
+import { RdapInspector } from './services/rdap-inspector';
+import { NmapInspector } from './services/nmap-inspector';
 
 import { calculateEvaluationScore } from './scoring/cyberscore-calculator';
 
@@ -86,9 +92,15 @@ export async function main(
             },
         );
 
+        const nmapInspector = new NmapInspector(
+            targetValidator,
+            undefined,
+            { defaultMode: config.nmap.scanMode },
+        );
+
         // =====================================================
-// 4. CREAR INSPECTORES Y RESOLVER DNS
-// =====================================================
+        // 4. CREAR INSPECTORES
+        // =====================================================
 
         const dnsResolver = new Resolver();
 
@@ -99,6 +111,8 @@ export async function main(
         const tlsInspector = new TlsInspector(
             targetValidator,
         );
+
+        const rdapInspector = new RdapInspector();
 
         // =====================================================
         // 5. CREAR ANALIZADORES
@@ -116,6 +130,65 @@ export async function main(
             httpInspector,
         );
 
+        const whoisAnalyzer = new WhoisAnalyzer({
+            rdapInspector,
+        });
+
+        const virusTotalAnalyzer = new VirusTotalAnalyzer({
+            apiKey: config.virusTotalApiKey ?? '',
+        });
+
+        const nmapAnalyzer = new NmapAnalyzer();
+
+        const analyzeNmapForDomain = async (
+            domain: string,
+            explicitlyAuthorized: boolean,
+        ) => {
+            if (!explicitlyAuthorized) {
+                return {
+                    status: 'skipped',
+                    authorized: false,
+                    scope: domain,
+                    mode: config.nmap.scanMode,
+                    openPorts: [],
+                    reason: 'domain_not_explicitly_authorized',
+                };
+            }
+
+            try {
+                const inspection = await nmapInspector.inspect(
+                    domain,
+                    {
+                        authorized: true,
+                        scope: domain,
+                    },
+                );
+
+                return await nmapAnalyzer.analyze(inspection);
+            } catch (error: unknown) {
+                const message = error instanceof Error
+                    ? error.message.slice(0, 500)
+                    : 'Error desconocido durante la inspección Nmap.';
+
+                logger.warn(
+                    {
+                        domain,
+                        error: message,
+                    },
+                    'La inspección Nmap falló; continúa el resto de la evaluación.',
+                );
+
+                return {
+                    status: 'failed',
+                    authorized: true,
+                    scope: domain,
+                    mode: config.nmap.scanMode,
+                    openPorts: [],
+                    error: message,
+                };
+            }
+        };
+
         // 6. Crear orquestador de seguridad.
         const securityAnalyzer = new SecurityAnalyzer({
             dnsAnalyzer,
@@ -123,26 +196,83 @@ export async function main(
             headersAnalyzer,
         });
 
-        // 7. Crear procesador.
+        // =====================================================
+        // 7. CREAR PROCESADOR
+        // =====================================================
+
         const workerProcessor = new WorkerProcessor(
             evaluationRepository,
             evaluationResultRepository,
 
             async evaluation => {
-                // Ejecutar los análisis DNS, TLS y HTTP.
-                const securityResult =
-                    await securityAnalyzer.analyze(evaluation.domain);
+                // WorkerProcessor solo entrega evaluaciones cuyo dominio
+                // coincide con un activo autorizado de esta PyME en MySQL.
+                targetValidator.authorizeRegisteredDomain(evaluation.domain);
 
-                // Incorporar los registros DNS al resumen
-                // para conservarlos en MySQL.
+                // Ejecutar los análisis independientes en paralelo.
+                const [
+                    securityResult,
+                    whoisResult,
+                    virusTotalResult,
+                    nmapResult,
+                ] = await Promise.all([
+                    securityAnalyzer.analyze(evaluation.domain),
+                    whoisAnalyzer.analyze(evaluation.domain),
+                    virusTotalAnalyzer.analyze(evaluation.domain),
+                    analyzeNmapForDomain(
+                        evaluation.domain,
+                        evaluation.domainAuthorized,
+                    ),
+                ]);
+
+                // Conservar los resultados detallados de cada análisis.
                 const layersSummary = {
                     ...securityResult.layersSummary,
+
                     dnsRecords: securityResult.dnsRecords,
+
+                    whois: {
+                        status: whoisResult.status,
+                        domain: whoisResult.domain,
+                        creationDate: whoisResult.creationDate,
+                        expirationDate: whoisResult.expirationDate,
+                        updatedDate: whoisResult.updatedDate,
+                        registrar: whoisResult.registrar,
+                        domainAgeDays: whoisResult.domainAgeDays,
+                        daysUntilExpiration: whoisResult.daysUntilExpiration,
+                        error: whoisResult.error,
+                    },
+
+                    virusTotal: {
+                        status: virusTotalResult.status,
+                        domain: virusTotalResult.domain,
+                        stats: virusTotalResult.stats,
+                        communityReputation:
+                            virusTotalResult.communityReputation,
+                        categories: virusTotalResult.categories,
+                        creationDate: virusTotalResult.creationDate,
+                        alertEngines: virusTotalResult.alertEngines,
+                        error: virusTotalResult.error,
+                    },
+
+                    nmap: nmapResult,
                 };
 
-                // Calcular el CyberScore.
+                // Calcular el CyberScore con penalizaciones independientes.
                 const scoringResult = calculateEvaluationScore({
                     findings: securityResult.findings,
+                    nmap: nmapResult,
+
+                    whois: {
+                        status: whoisResult.status,
+                        daysUntilExpiration:
+                            whoisResult.daysUntilExpiration,
+                    },
+
+                    virusTotal: {
+                        status: virusTotalResult.status,
+                        stats: virusTotalResult.stats,
+                    },
 
                     businessContext: {
                         monthlyRevenue: evaluation.monthlyRevenue,
@@ -159,6 +289,12 @@ export async function main(
                         domain: evaluation.domain,
                         findings: securityResult.findings.length,
                         score: scoringResult.score,
+                        baseScore: scoringResult.baseScore,
+                        whoisPenalty: scoringResult.whoisPenalty,
+                        virusTotalPenalty:
+                            scoringResult.virusTotalPenalty,
+                        nmapPenalty: scoringResult.nmapPenalty,
+                        virusTotalStatus: virusTotalResult.status,
                         level: scoringResult.level,
                     },
                     'Análisis y cálculo CyberScore completados.',
@@ -181,6 +317,10 @@ export async function main(
                 demoMode: config.allowAnyPublicDomain,
                 batchSize: config.worker.batchSize,
                 pollIntervalMs: config.worker.pollIntervalMs,
+                virusTotalConfigured: Boolean(
+                    config.virusTotalApiKey,
+                ),
+                nmapMode: config.nmap.scanMode,
             },
             'CyberScore Worker iniciado correctamente.',
         );
@@ -230,7 +370,6 @@ export async function main(
 
     } finally {
         await closeDatabaseConnection();
-
         logger.info('Conexión MySQL cerrada.');
     }
 }

@@ -1,4 +1,4 @@
-export const FINDING_RISK_MATRIX_VERSION = '1.0';
+export const FINDING_RISK_MATRIX_VERSION = '1.1';
 
 export interface LikelihoodFactors {
     discovery: number;
@@ -38,7 +38,7 @@ export interface FindingIdentification {
 }
 
 /**
- * Matriz metodológica CyberScore PYME v1.0.
+ * Matriz metodológica CyberScore PYME v1.1.
  *
  * Los valores constituyen estimaciones propias del proyecto,
  * fundamentadas en criterios de OWASP Risk Rating Methodology.
@@ -264,6 +264,41 @@ export const FINDING_RISK_MATRIX: readonly FindingRiskProfile[] = [
             'La ausencia de la cabecera es observable externamente.',
             'La exposición depende de las URL y de la información contenida en ellas.',
             'No se presupone filtración efectiva de credenciales.',
+            'El factor de detección interna utiliza un supuesto provisional.',
+        ],
+    },
+
+    {
+        id: 'HTTP_X_XSS_PROTECTION_MISSING',
+
+        layer: 'headers',
+
+        matchTerms: [
+            'x-xss-protection',
+        ],
+
+        likelihood: {
+            discovery: 9,
+            exploitation: 2,
+            awareness: 9,
+            detectionDifficulty: 8,
+        },
+
+        technicalImpact: {
+            confidentiality: 1,
+            integrity: 2,
+            availability: 0,
+            accountability: 0,
+        },
+
+        interruptionHours: 0,
+
+        remediationHours: 0.25,
+
+        assumptions: [
+            'La ausencia de la cabecera es observable externamente.',
+            'X-XSS-Protection es una cabecera heredada y su efecto depende del navegador.',
+            'No se presupone que exista una vulnerabilidad XSS ni que esta cabecera la evite.',
             'El factor de detección interna utiliza un supuesto provisional.',
         ],
     },

@@ -19,75 +19,109 @@ describe('HeadersAnalyzer', () => {
         analyzer = new HeadersAnalyzer(httpMock);
     });
 
-    it('consulta las cabeceras HTTP del dominio', async () => {
-        httpMock.inspect.mockResolvedValue({
+    function createInspection(
+        headers: Record<string, string | string[]> = {},
+    ) {
+        return {
             statusCode: 200,
-            headers: {
-                'strict-transport-security': 'max-age=31536000',
-                'content-security-policy': "default-src 'self'",
-                'x-content-type-options': 'nosniff',
-                'x-frame-options': 'DENY',
-                'referrer-policy': 'no-referrer',
-            },
-        });
+            headers,
+            url: 'https://example.com/',
+            usesHttps: true,
+            server: 'nginx',
+        };
+    }
+
+    it('consulta las cabeceras HTTP del dominio', async () => {
+        httpMock.inspect.mockResolvedValue(createInspection({
+            'strict-transport-security': 'max-age=31536000',
+            'content-security-policy': "default-src 'self'",
+            'x-content-type-options': 'nosniff',
+            'x-frame-options': 'DENY',
+            'referrer-policy': 'no-referrer',
+            'x-xss-protection': '0',
+        }));
 
         await analyzer.analyze('example.com');
 
         expect(httpMock.inspect).toHaveBeenCalledWith('example.com');
     });
 
-    it('devuelve las cabeceras recopiladas', async () => {
+    it('devuelve las cabeceras y la información HTTP recopilada', async () => {
         const headers = {
             'strict-transport-security': 'max-age=31536000',
             'content-security-policy': "default-src 'self'",
             'x-content-type-options': 'nosniff',
             'x-frame-options': 'DENY',
             'referrer-policy': 'no-referrer',
+            'x-xss-protection': '0',
         };
 
-        httpMock.inspect.mockResolvedValue({
-            statusCode: 200,
-            headers,
-        });
+        httpMock.inspect.mockResolvedValue(createInspection(headers));
 
         const result = await analyzer.analyze('example.com');
 
         expect(result.status).toBe('completed');
         expect(result.statusCode).toBe(200);
         expect(result.headers).toEqual(headers);
+        expect(result.url).toBe('https://example.com/');
+        expect(result.usesHttps).toBe(true);
+        expect(result.server).toBe('nginx');
+
+        expect(result.presentHeaders).toEqual([
+            'Strict-Transport-Security',
+            'Content-Security-Policy',
+            'X-Content-Type-Options',
+            'X-Frame-Options',
+            'Referrer-Policy',
+            'X-XSS-Protection',
+        ]);
+
+        expect(result.missingHeaders).toEqual([]);
         expect(result.findings).toEqual([]);
     });
 
-    it('genera hallazgos cuando faltan cabeceras de seguridad', async () => {
-        httpMock.inspect.mockResolvedValue({
-            statusCode: 200,
-            headers: {},
-        });
+    it('normaliza los nombres de las cabeceras sin importar sus mayúsculas', async () => {
+        httpMock.inspect.mockResolvedValue(createInspection({
+            'Strict-Transport-Security': 'max-age=31536000',
+            'CONTENT-SECURITY-POLICY': "default-src 'self'",
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'Referrer-Policy': 'no-referrer',
+            'X-XSS-Protection': '0',
+        }));
 
         const result = await analyzer.analyze('example.com');
 
-        expect(result.findings.length).toBeGreaterThan(0);
+        expect(result.findings).toEqual([]);
+        expect(result.presentHeaders).toHaveLength(6);
+    });
 
-        expect(result.findings).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({
-                    title: 'Cabecera de seguridad ausente',
-                }),
-            ]),
-        );
+    it('genera hallazgos y conserva las cabeceras faltantes', async () => {
+        httpMock.inspect.mockResolvedValue(createInspection({}));
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.findings).toHaveLength(6);
+
+        expect(result.missingHeaders).toEqual([
+            'Strict-Transport-Security',
+            'Content-Security-Policy',
+            'X-Content-Type-Options',
+            'X-Frame-Options',
+            'Referrer-Policy',
+            'X-XSS-Protection',
+        ]);
     });
 
     it('genera un hallazgo cuando una cabecera está presente como arreglo vacío', async () => {
-        httpMock.inspect.mockResolvedValue({
-            statusCode: 200,
-            headers: {
-                'strict-transport-security': [],
-                'content-security-policy': "default-src 'self'",
-                'x-content-type-options': 'nosniff',
-                'x-frame-options': 'DENY',
-                'referrer-policy': 'no-referrer',
-            },
-        });
+        httpMock.inspect.mockResolvedValue(createInspection({
+            'strict-transport-security': [],
+            'content-security-policy': "default-src 'self'",
+            'x-content-type-options': 'nosniff',
+            'x-frame-options': 'DENY',
+            'referrer-policy': 'no-referrer',
+            'x-xss-protection': '0',
+        }));
 
         const result = await analyzer.analyze('example.com');
 
@@ -97,6 +131,22 @@ describe('HeadersAnalyzer', () => {
                     'No se encontró Strict-Transport-Security (HSTS).',
             }),
         ]);
+
+        expect(result.missingHeaders).toEqual([
+            'Strict-Transport-Security',
+        ]);
+    });
+
+    it('considera una cabecera vacía como ausente', async () => {
+        httpMock.inspect.mockResolvedValue(createInspection({
+            'strict-transport-security': '   ',
+        }));
+
+        const result = await analyzer.analyze('example.com');
+
+        expect(result.missingHeaders).toContain(
+            'Strict-Transport-Security',
+        );
     });
 
     it('rechaza un dominio vacío sin consultar HTTP', async () => {

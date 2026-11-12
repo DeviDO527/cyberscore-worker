@@ -87,6 +87,12 @@ export class NetworkTargetValidator {
             options.allowAnyPublicDomain ?? false;
     }
 
+    /** Permite un dominio únicamente después de que el worker confirma
+     * la autorización registrada en MySQL para la evaluación reclamada. */
+    authorizeRegisteredDomain(input: string): void {
+        this.allowedDomains.add(this.normalizeHostname(input));
+    }
+
     async validate(input: string): Promise<ValidatedTarget> {
         const hostname = this.normalizeHostname(input);
 

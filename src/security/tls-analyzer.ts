@@ -1,6 +1,7 @@
 export interface TlsCertificate {
     validFrom: string;
     validTo: string;
+    daysRemaining: number | null;
     subject: Record<string, unknown>;
     issuer: Record<string, unknown>;
 }
@@ -83,10 +84,27 @@ export class TlsAnalyzer {
             certificate: {
                 validFrom: inspection.validFrom,
                 validTo: inspection.validTo,
+                daysRemaining: this.calculateDaysRemaining(
+                    inspection.validTo,
+                ),
                 subject: inspection.subject,
                 issuer: inspection.issuer,
             },
             findings,
         };
+    }
+
+    private calculateDaysRemaining(validTo: string): number | null {
+        const expirationDate = new Date(validTo);
+
+        if (Number.isNaN(expirationDate.getTime())) {
+            return null;
+        }
+
+        const millisecondsPerDay = 1000 * 60 * 60 * 24;
+        const difference =
+            expirationDate.getTime() - Date.now();
+
+        return Math.ceil(difference / millisecondsPerDay);
     }
 }

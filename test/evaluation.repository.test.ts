@@ -54,6 +54,7 @@ describe('EvaluationRepository', () => {
                     id: 'evaluation-123',
                     pyme_id: 'pyme-456',
                     dominio: 'example.com',
+                    dominio_autorizado: 1,
                     ingresos_mensuales: '30000000.00',
                     horas_operativas: 300,
                     moneda: 'COP',
@@ -78,6 +79,8 @@ describe('EvaluationRepository', () => {
         expect(sql).toContain('ingresos_mensuales');
         expect(sql).toContain('horas_operativas');
         expect(sql).toContain('moneda');
+        expect(sql).toContain('d.autorizado = 1');
+        expect(sql).not.toContain('verificado');
         expect(queryCall).toBeDefined();
         expect(sql).toContain("WHERE e.estado = 'queued'");
         expect(sql).toContain('ORDER BY e.iniciado_en ASC, e.id ASC');
@@ -88,6 +91,7 @@ describe('EvaluationRepository', () => {
             id: 'evaluation-123',
             pymeId: 'pyme-456',
             domain: 'example.com',
+            domainAuthorized: true,
             monthlyRevenue: 30000000,
             operatingHours: 300,
             currency: 'COP',

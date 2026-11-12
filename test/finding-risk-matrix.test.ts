@@ -48,10 +48,16 @@ describe('FindingRiskMatrix', () => {
             description: 'No se encontró Referrer-Policy.',
             profile: 'HTTP_REFERRER_POLICY_MISSING',
         },
+        {
+            layer: 'headers',
+            title: 'Cabecera de seguridad ausente',
+            description: 'No se encontró X-XSS-Protection.',
+            profile: 'HTTP_X_XSS_PROTECTION_MISSING',
+        },
     ];
 
-    it('contiene los seis perfiles definidos para la versión 1.0', () => {
-        expect(FINDING_RISK_MATRIX).toHaveLength(6);
+    it('contiene un perfil para cada uno de los hallazgos de cabeceras y TLS', () => {
+        expect(FINDING_RISK_MATRIX).toHaveLength(7);
     });
 
     it.each(findings)(

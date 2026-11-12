@@ -43,6 +43,12 @@ export class WorkerProcessor {
         }
 
         try {
+            if (!evaluation.domainAuthorized) {
+                throw new Error(
+                    'La evaluación no coincide con un dominio registrado y autorizado para esta PyME.',
+                );
+            }
+
             const analysis = await this.analyzeEvaluation(evaluation);
 
             const result: EvaluationResult = {

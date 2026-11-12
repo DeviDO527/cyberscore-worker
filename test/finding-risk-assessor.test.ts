@@ -111,7 +111,7 @@ describe('FindingRiskAssessor', () => {
             businessContext,
         );
 
-        expect(result.methodology.formulaVersion).toBe('1.0');
+        expect(result.methodology.formulaVersion).toBe('1.1');
         expect(result.methodology.matrixVersion).toBe(
             FINDING_RISK_MATRIX_VERSION,
         );

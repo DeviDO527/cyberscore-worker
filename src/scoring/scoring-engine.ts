@@ -1,4 +1,4 @@
-export const CYBERSCORE_FORMULA_VERSION = '1.0';
+export const CYBERSCORE_FORMULA_VERSION = '1.1';
 
 interface LikelihoodFactors {
   discovery: number;

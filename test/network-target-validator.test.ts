@@ -630,4 +630,18 @@ describe('NetworkTargetValidator', () => {
 
     });
 
+
+    it('autoriza un dominio registrado y normaliza su nombre', async () => {
+        validator.authorizeRegisteredDomain('  New.Example.COM.  ');
+        dnsMock.resolve.mockResolvedValue([
+            { address: '8.8.8.8', family: 4 },
+        ]);
+
+        await expect(
+            validator.validate('new.example.com'),
+        ).resolves.toMatchObject({
+            hostname: 'new.example.com',
+            addresses: ['8.8.8.8'],
+        });
+    });
 });

@@ -1,3 +1,4 @@
+
 import {
     afterEach,
     describe,
@@ -122,8 +123,8 @@ describe('CyberScoreCalculator', () => {
             layersSummary,
         });
 
-        expect(result.formulaVersion).toBe('1.0');
-        expect(result.matrixVersion).toBe('1.0');
+        expect(result.formulaVersion).toBe('1.1');
+        expect(result.matrixVersion).toBe('1.1');
         expect(result.estimated).toBe(true);
     });
 
@@ -219,8 +220,8 @@ describe('CyberScoreCalculator', () => {
     });
 
     // =====================================================
-// CLASIFICACIÓN DE RIESGO
-// =====================================================
+    // CLASIFICACIÓN DE RIESGO
+    // =====================================================
 
     it.each([
         { score: 100, level: 'Bajo' },
@@ -241,7 +242,7 @@ describe('CyberScoreCalculator', () => {
             ).mockReturnValue({
                 score,
                 riskIndex: 1 - score / 100,
-                formulaVersion: '1.0',
+                formulaVersion: '1.1',
             });
 
             const result = calculateEvaluationScore({
@@ -256,8 +257,8 @@ describe('CyberScoreCalculator', () => {
     );
 
     // =====================================================
-// VALIDACIONES DE ENTRADA
-// =====================================================
+    // VALIDACIONES DE ENTRADA
+    // =====================================================
 
     it('rechaza una entrada nula', () => {
 
@@ -307,7 +308,6 @@ describe('CyberScoreCalculator', () => {
         );
     });
 
-
     it.each([
         {
             description: 'una capa nula',
@@ -328,7 +328,7 @@ describe('CyberScoreCalculator', () => {
     ])(
         'rechaza una evaluación cuando DNS contiene $description',
         ({ result }) => {
-        
+
             expect(() =>
                 calculateEvaluationScore({
                     findings,
@@ -345,4 +345,142 @@ describe('CyberScoreCalculator', () => {
         },
     );
 
+    // =====================================================
+    // PENALIZACIÓN WHOIS
+    // =====================================================
+
+    describe('penalización WHOIS', () => {
+        it.each([1, 15, 29])(
+            'descuenta exactamente 15 puntos cuando faltan %i días para vencer',
+            daysUntilExpiration => {
+                const baseResult = calculateEvaluationScore({
+                    findings: [],
+                    businessContext,
+                    layersSummary: {
+                        dns: { status: 'completed', findings: 0 },
+                        tls: { status: 'completed', findings: 0 },
+                        headers: { status: 'completed', findings: 0 },
+                    },
+                });
+
+                const result = calculateEvaluationScore({
+                    findings: [],
+                    businessContext,
+                    layersSummary: {
+                        dns: { status: 'completed', findings: 0 },
+                        tls: { status: 'completed', findings: 0 },
+                        headers: { status: 'completed', findings: 0 },
+                    },
+                    whois: {
+                        status: 'completed',
+                        daysUntilExpiration,
+                    },
+                });
+
+                expect(result.whoisPenalty).toBe(15);
+                expect(result.baseScore).toBe(baseResult.score);
+                expect(result.score).toBe(Math.max(baseResult.score - 15, 0));
+                expect(result.layersSummary.scoring).toMatchObject({
+                    whoisPenalty: 15,
+                    whoisStatus: 'completed',
+                    whoisDaysUntilExpiration: daysUntilExpiration,
+                });
+            },
+        );
+
+        it.each([30, 0, -1])(
+            'no aplica penalización cuando faltan %i días o el dominio ya venció',
+            daysUntilExpiration => {
+                const result = calculateEvaluationScore({
+                    findings: [],
+                    businessContext,
+                    layersSummary,
+                    whois: {
+                        status: 'completed',
+                        daysUntilExpiration,
+                    },
+                });
+
+                expect(result.whoisPenalty).toBe(0);
+                expect(result.score).toBe(result.baseScore);
+            },
+        );
+
+        it('no aplica penalización cuando la consulta WHOIS falla', () => {
+            const result = calculateEvaluationScore({
+                findings: [],
+                businessContext,
+                layersSummary,
+                whois: {
+                    status: 'failed',
+                    daysUntilExpiration: 10,
+                },
+            });
+
+            expect(result.whoisPenalty).toBe(0);
+            expect(result.score).toBe(result.baseScore);
+        });
+
+        it('no aplica penalización cuando no se proporcionan datos WHOIS', () => {
+            const result = calculateEvaluationScore({
+                findings: [],
+                businessContext,
+                layersSummary,
+            });
+
+            expect(result.whoisPenalty).toBe(0);
+            expect(result.score).toBe(100);
+        });
+
+        it('limita la puntuación final a cero si la penalización supera la puntuación base', () => {
+            jest.spyOn(
+                scoringEngine,
+                'calculateCyberScore',
+            ).mockReturnValue({
+                score: 10,
+                riskIndex: 0.9,
+                formulaVersion: '1.1',
+            });
+
+            const result = calculateEvaluationScore({
+                findings,
+                businessContext,
+                layersSummary,
+                whois: {
+                    status: 'completed',
+                    daysUntilExpiration: 10,
+                },
+            });
+
+            expect(result.baseScore).toBe(10);
+            expect(result.whoisPenalty).toBe(15);
+            expect(result.score).toBe(0);
+            expect(result.rawScore).toBe(0);
+        });
+    });
+
+
+        it('rechaza una colección de puertos Nmap que no sea una lista', () => {
+            expect(() => calculateEvaluationScore({
+                findings: [],
+                businessContext,
+                layersSummary,
+                nmap: {
+                    status: 'completed',
+                    openPorts: 'no es una lista',
+                } as never,
+            })).toThrow('Los puertos abiertos de Nmap deben proporcionarse como una lista.');
+        });
+
+        it('rechaza un puerto Nmap nulo dentro de la lista', () => {
+            expect(() => calculateEvaluationScore({
+                findings: [],
+                businessContext,
+                layersSummary,
+                nmap: {
+                    status: 'completed',
+                    openPorts: [null],
+                } as never,
+            })).toThrow('El puerto Nmap proporcionado no es válido.');
+        });
 });

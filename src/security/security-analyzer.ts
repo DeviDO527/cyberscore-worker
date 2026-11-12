@@ -16,24 +16,36 @@ export interface LayerAnalysisResult {
     findings: SecurityFinding[];
 }
 
-export interface DnsLayerAnalysisResult extends LayerAnalysisResult {
+export interface DnsLayerAnalysisResult
+    extends LayerAnalysisResult {
     records: DnsRecords;
 }
 
-export interface TlsLayerAnalysisResult extends LayerAnalysisResult {
+export interface TlsLayerAnalysisResult
+    extends LayerAnalysisResult {
     authorized: boolean;
     protocol: string;
     certificate: {
         validFrom: string;
         validTo: string;
+        daysRemaining: number | null;
         subject: Record<string, unknown>;
         issuer: Record<string, unknown>;
     };
 }
 
-export interface HeadersLayerAnalysisResult extends LayerAnalysisResult {
+export interface HeadersLayerAnalysisResult
+    extends LayerAnalysisResult {
     statusCode: number;
-    headers: Record<string, string | string[] | undefined>;
+    headers: Record<
+        string,
+        string | string[] | undefined
+    >;
+    url: string;
+    usesHttps: boolean;
+    server: string | null;
+    presentHeaders: string[];
+    missingHeaders: string[];
 }
 
 export interface SecurityLayerAnalyzer<
@@ -56,10 +68,25 @@ export interface SecurityLayersSummary {
     tls: {
         status: string;
         findings: number;
+        authorized: boolean;
+        protocol: string;
+        certificate: {
+            validFrom: string;
+            validTo: string;
+            daysRemaining: number | null;
+            subject: Record<string, unknown>;
+            issuer: Record<string, unknown>;
+        };
     };
     headers: {
         status: string;
         findings: number;
+        statusCode: number;
+        url: string;
+        usesHttps: boolean;
+        server: string | null;
+        presentHeaders: string[];
+        missingHeaders: string[];
     };
 }
 
@@ -74,7 +101,9 @@ export class SecurityAnalyzer {
         private readonly dependencies: SecurityAnalyzerDependencies,
     ) {}
 
-    async analyze(domain: string): Promise<SecurityAnalysisResult> {
+    async analyze(
+        domain: string,
+    ): Promise<SecurityAnalysisResult> {
         if (
             typeof domain !== 'string' ||
             domain.trim().length === 0
@@ -92,31 +121,37 @@ export class SecurityAnalyzer {
             );
 
         if (!validDomain) {
-            throw new Error('El dominio no tiene un formato válido');
+            throw new Error(
+                'El dominio no tiene un formato válido',
+            );
         }
 
-        // Ejecutar los tres analizadores.
-        const [dnsResult, tlsResult, headersResult] =
-            await Promise.all([
-                this.dependencies.dnsAnalyzer.analyze(normalizedDomain),
-                this.dependencies.tlsAnalyzer.analyze(normalizedDomain),
-                this.dependencies.headersAnalyzer.analyze(normalizedDomain),
-            ]);
+        const [
+            dnsResult,
+            tlsResult,
+            headersResult,
+        ] = await Promise.all([
+            this.dependencies.dnsAnalyzer.analyze(
+                normalizedDomain,
+            ),
+            this.dependencies.tlsAnalyzer.analyze(
+                normalizedDomain,
+            ),
+            this.dependencies.headersAnalyzer.analyze(
+                normalizedDomain,
+            ),
+        ]);
 
-        // Evidencia DNS.
         const dnsEvidence = JSON.stringify({
             records: dnsResult.records,
         });
 
-        // Evidencia TLS.
         const tlsEvidence = JSON.stringify({
             authorized: tlsResult.authorized,
             protocol: tlsResult.protocol,
             certificate: tlsResult.certificate,
         });
 
-        // Evitar almacenar cabeceras que puedan contener
-        // cookies u otros datos sensibles.
         const relevantHeaders = new Set([
             'strict-transport-security',
             'content-security-policy',
@@ -127,20 +162,26 @@ export class SecurityAnalyzer {
             'cross-origin-embedder-policy',
             'cross-origin-opener-policy',
             'cross-origin-resource-policy',
+            'x-xss-protection',
         ]);
 
         const safeHeaders = Object.fromEntries(
             Object.entries(headersResult.headers).filter(
-                ([name]) => relevantHeaders.has(name.toLowerCase()),
+                ([name]) =>
+                    relevantHeaders.has(
+                        name.toLowerCase(),
+                    ),
             ),
         );
 
         const headersEvidence = JSON.stringify({
             statusCode: headersResult.statusCode,
+            url: headersResult.url,
+            usesHttps: headersResult.usesHttps,
+            server: headersResult.server,
             headers: safeHeaders,
         });
 
-        // Enriquecer los hallazgos con su procedencia y evidencia.
         const dnsFindings: EnrichedSecurityFinding[] =
             dnsResult.findings.map(finding => ({
                 ...finding,
@@ -178,13 +219,28 @@ export class SecurityAnalyzer {
                     status: dnsResult.status,
                     findings: dnsFindings.length,
                 },
+
                 tls: {
                     status: tlsResult.status,
                     findings: tlsFindings.length,
+                    authorized: tlsResult.authorized,
+                    protocol: tlsResult.protocol,
+                    certificate: tlsResult.certificate,
                 },
+
                 headers: {
                     status: headersResult.status,
                     findings: headersFindings.length,
+                    statusCode:
+                        headersResult.statusCode,
+                    url: headersResult.url,
+                    usesHttps:
+                        headersResult.usesHttps,
+                    server: headersResult.server,
+                    presentHeaders:
+                        headersResult.presentHeaders,
+                    missingHeaders:
+                        headersResult.missingHeaders,
                 },
             },
         };

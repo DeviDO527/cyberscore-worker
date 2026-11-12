@@ -8,6 +8,7 @@ export interface PendingEvaluation {
     id: string;
     pymeId: string;
     domain: string;
+    domainAuthorized: boolean;
     monthlyRevenue: number;
     operatingHours: number;
     currency: string;
@@ -17,6 +18,7 @@ interface EvaluationRow extends RowDataPacket {
     id: string;
     pyme_id: string;
     dominio: string;
+    dominio_autorizado: number | boolean;
     ingresos_mensuales: number | string;
     horas_operativas: number | string;
     moneda: string;
@@ -48,6 +50,13 @@ export class EvaluationRepository {
                     e.id,
                     e.pyme_id,
                     e.dominio,
+                    EXISTS (
+                        SELECT 1
+                        FROM dominios d
+                        WHERE d.pyme_id = e.pyme_id
+                          AND LOWER(d.dominio) = LOWER(e.dominio)
+                          AND d.autorizado = 1
+                    ) AS dominio_autorizado,
                     p.ingresos_mensuales,
                     p.horas_operativas,
                     p.moneda
@@ -145,6 +154,7 @@ export class EvaluationRepository {
             id: row.id,
             pymeId: row.pyme_id,
             domain: row.dominio,
+            domainAuthorized: Boolean(row.dominio_autorizado),
             monthlyRevenue,
             operatingHours,
             currency,
