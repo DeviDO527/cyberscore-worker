@@ -95,6 +95,7 @@ describe('NmapInspector', () => {
         ]);
         expect(runner.calls[0]?.args).not.toContain('example.com');
         expect(runner.calls[0]?.binaryPath).toBe('nmap');
+        expect(runner.calls[0]?.options.timeoutMs).toBe(300_000);
         expect(result.authorization).toEqual(authorization);
         expect(result.scans[0]).toEqual({
             address: '8.8.8.8',

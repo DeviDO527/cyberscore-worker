@@ -51,6 +51,38 @@ function sleep(milliseconds: number): Promise<void> {
     });
 }
 
+async function processWorkerBatch(
+    workerProcessor: Pick<WorkerProcessor, 'processNext'>,
+    batchSize: number,
+    isShutdownRequested: () => boolean,
+): Promise<boolean> {
+    let processedAny = false;
+
+    try {
+        for (
+            let index = 0;
+            index < batchSize && !isShutdownRequested();
+            index++
+        ) {
+            const processed = await workerProcessor.processNext();
+            if (!processed) break;
+            processedAny = true;
+        }
+    } catch (error) {
+        logger.error(
+            {
+                error:
+                    error instanceof Error
+                        ? error.message
+                        : 'Error desconocido.',
+            },
+            'Error durante el ciclo de procesamiento.',
+        );
+    }
+
+    return processedAny;
+}
+
 // =====================================================
 // INICIALIZACIÓN DEL WORKER
 // =====================================================
@@ -95,7 +127,13 @@ export async function main(
         const nmapInspector = new NmapInspector(
             targetValidator,
             undefined,
-            { defaultMode: config.nmap.scanMode },
+            {
+                defaultMode: config.nmap.scanMode,
+                standardTimeoutMs: config.nmap.standardTimeoutMs,
+                ...(config.nmap.binaryPath
+                    ? { binaryPath: config.nmap.binaryPath }
+                    : {}),
+            },
         );
 
         // =====================================================
@@ -330,35 +368,11 @@ export async function main(
         // =================================================
 
         while (!shutdownRequested) {
-            let processedAny = false;
-
-            try {
-                for (
-                    let index = 0;
-                    index < config.worker.batchSize &&
-                    !shutdownRequested;
-                    index++
-                ) {
-                    const processed =
-                        await workerProcessor.processNext();
-
-                    if (!processed) {
-                        break;
-                    }
-
-                    processedAny = true;
-                }
-            } catch (error) {
-                logger.error(
-                    {
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : 'Error desconocido.',
-                    },
-                    'Error durante el ciclo de procesamiento.',
-                );
-            }
+            const processedAny = await processWorkerBatch(
+                workerProcessor,
+                config.worker.batchSize,
+                () => shutdownRequested,
+            );
 
             // Esperar únicamente cuando no existan evaluaciones.
             if (!processedAny && !shutdownRequested) {

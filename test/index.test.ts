@@ -17,6 +17,7 @@ interface WorkerConfig {
     allowAnyPublicDomain: boolean;
     nmap: {
         scanMode: 'standard' | 'deep';
+        standardTimeoutMs: number;
     };
     virusTotalApiKey?: string;
     worker: {
@@ -95,6 +96,7 @@ describe('arranque de CyberScore Worker', () => {
             allowAnyPublicDomain: false,
             nmap: {
                 scanMode: 'standard',
+                standardTimeoutMs: 300_000,
             },
             virusTotalApiKey: 'a'.repeat(64),
 
@@ -437,6 +439,7 @@ describe('arranque de CyberScore Worker', () => {
 
             expect(nmapInspectorOptions).toEqual({
                 defaultMode: 'standard',
+                standardTimeoutMs: 300_000,
             });
             expect(inspectNmap).toHaveBeenCalledWith(
                 'example.com',

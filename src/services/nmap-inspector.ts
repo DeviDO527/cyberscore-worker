@@ -62,7 +62,7 @@ export interface NmapInspectionResult {
     scans: NmapHostScan[];
 }
 
-const DEFAULT_STANDARD_TIMEOUT_MS = 120_000;
+const DEFAULT_STANDARD_TIMEOUT_MS = 300_000;
 const DEFAULT_DEEP_TIMEOUT_MS = 900_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_TARGETS = 16;

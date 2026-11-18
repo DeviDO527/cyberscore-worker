@@ -32,6 +32,8 @@ export interface WorkerConfig {
 
     nmap: {
         scanMode: 'standard' | 'deep';
+        binaryPath?: string;
+        standardTimeoutMs: number;
     };
 
     virusTotalApiKey?: string;
@@ -207,6 +209,11 @@ export function loadConfig(): WorkerConfig {
 
     const virusTotalApiKey = optionalString('VIRUSTOTAL_API_KEY');
     const nmapScanMode = parseNmapScanMode();
+    const nmapBinaryPath = optionalString('NMAP_BINARY_PATH');
+    const nmapStandardTimeoutMs = positiveInteger(
+        'NMAP_STANDARD_TIMEOUT_MS',
+        300_000,
+    );
 
     return {
         nodeEnv,
@@ -237,6 +244,8 @@ export function loadConfig(): WorkerConfig {
 
         nmap: {
             scanMode: nmapScanMode,
+            standardTimeoutMs: nmapStandardTimeoutMs,
+            ...(nmapBinaryPath ? { binaryPath: nmapBinaryPath } : {}),
         },
 
         ...(virusTotalApiKey ? { virusTotalApiKey } : {}),

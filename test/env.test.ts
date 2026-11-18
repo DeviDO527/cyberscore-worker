@@ -46,12 +46,38 @@ describe('WorkerConfig', () => {
         expect(config.nmap.scanMode).toBe('standard');
     });
 
+    it('usa un límite predeterminado de cinco minutos para Nmap estándar', () => {
+        delete process.env.NMAP_STANDARD_TIMEOUT_MS;
+
+        const config = loadConfig();
+
+        expect(config.nmap.standardTimeoutMs).toBe(300_000);
+    });
+
+    it('permite configurar el límite del escaneo estándar', () => {
+        process.env.NMAP_STANDARD_TIMEOUT_MS = '240000';
+
+        const config = loadConfig();
+
+        expect(config.nmap.standardTimeoutMs).toBe(240_000);
+    });
+
     it('permite configurar el modo deep para Nmap', () => {
         process.env.NMAP_SCAN_MODE = 'deep';
 
         const config = loadConfig();
 
         expect(config.nmap.scanMode).toBe('deep');
+    });
+
+    it('permite configurar y normaliza la ruta del ejecutable Nmap', () => {
+        process.env.NMAP_BINARY_PATH = '  C:\\Program Files (x86)\\Nmap\\nmap.exe  ';
+
+        const config = loadConfig();
+
+        expect(config.nmap.binaryPath).toBe(
+            'C:\\Program Files (x86)\\Nmap\\nmap.exe',
+        );
     });
 
     it('normaliza mayúsculas y espacios en la modalidad Nmap', () => {

@@ -146,6 +146,27 @@ cp .env.example .env
 
 Después, complete las credenciales y los dominios permitidos en `.env`.
 
+## Análisis con SonarQube
+
+El proyecto incluye el escáner de Sonar y el comando genera primero las pruebas
+y el reporte de cobertura LCOV que Sonar consume:
+
+```bash
+npm run sonar
+```
+
+Configure `SONAR_TOKEN` como variable de entorno antes del análisis; no guarde
+tokens en `sonar-project.properties` ni los suba al repositorio. En PowerShell:
+
+```powershell
+$env:SONAR_TOKEN = "token-generado-en-SonarQube"
+npm run sonar
+```
+
+La URL del servidor y el identificador del proyecto están configurados en
+`sonar-project.properties`. Asegúrese de que el servidor SonarQube esté
+disponible antes de ejecutar el comando.
+
 ## Configuración
 
 | Variable | Obligatoria | Valor predeterminado | Descripción |
@@ -162,6 +183,8 @@ Después, complete las credenciales y los dominios permitidos en `.env`.
 | `ALLOWED_DOMAINS` | No | — | Lista administrativa opcional de dominios. No reemplaza el activo autorizado en MySQL. |
 | `ALLOW_ANY_PUBLIC_DOMAIN` | No | `false` | Compatibilidad con validación de red; el worker procesa evaluaciones solo si el activo coincide en MySQL y tiene autorización declarada. |
 | `NMAP_SCAN_MODE` | No | `standard` | `standard` examina los 1000 puertos TCP principales; `deep` examina todos los puertos TCP. |
+| `NMAP_STANDARD_TIMEOUT_MS` | No | `300000` | Límite del escaneo estándar en milisegundos (5 minutos). |
+| `NMAP_BINARY_PATH` | No | `nmap` | Nombre o ruta al ejecutable de Nmap. En Windows puede apuntar a `C:\Program Files (x86)\Nmap\nmap.exe`; Docker instala Nmap en `PATH`. |
 | `VIRUSTOTAL_API_KEY` | No | — | Clave API v3 opcional para consultar reputación, estadísticas y categorías del dominio. Sin clave válida, la capa se informa como no disponible. |
 
 Ejemplo mínimo:
@@ -179,6 +202,8 @@ WORKER_BATCH_SIZE=1
 ALLOWED_DOMAINS=
 ALLOW_ANY_PUBLIC_DOMAIN=false
 NMAP_SCAN_MODE=standard
+NMAP_STANDARD_TIMEOUT_MS=300000
+NMAP_BINARY_PATH=
 # VIRUSTOTAL_API_KEY=clave_api_v3
 ```
 
@@ -299,4 +324,3 @@ No incluya secretos, archivos `.env`, `node_modules/`, `dist/` ni reportes de co
 ## Licencia
 
 Este proyecto declara licencia `ISC` en `package.json`. Consulte ese archivo para los términos aplicables.
-
